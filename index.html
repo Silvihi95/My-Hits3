@@ -198,11 +198,7 @@
       <strong id="activePlayerName"></strong> hat die Karte platziert – aber noch niemand weiß ob richtig oder falsch!<br>
       Wer möchte gegenbieten? Der Klauende sieht den Zeitstrahl von <strong id="activePlayerName2"></strong> und muss die Karte dort einordnen.
     </p>
-
-    <!-- Klauen-Buttons: alle außer dem aktiven Spieler -->
     <div id="stealPlayerButtons"></div>
-
-    <!-- Zeitstrahl des aktiven Spielers zum Einordnen -->
     <div id="stealPlacementArea" class="hidden-section">
       <p style="font-size:0.9em;margin-bottom:4px;">
         <strong id="stealingPlayerName"></strong> – wo im Zeitstrahl von <strong id="activePlayerName3"></strong> gehört die Karte?
@@ -212,15 +208,12 @@
         <button class="secondary" id="stealCancelBtn">↩ Doch nicht klauen</button>
       </div>
     </div>
-
-    <!-- Auflösen-Button: für ALLE sichtbar sobald Slot gewählt -->
+    <!-- ✅ Auflösen-Button für ALLE sichtbar -->
     <div id="stealResolveArea" class="hidden-section" style="margin-top:8px;">
       <button class="steal" id="stealReadyBtn" style="width:100%;" disabled>
         ✅ Fertig – beide auflösen! (jeder kann drücken)
       </button>
     </div>
-
-    <!-- Niemand klaut -->
     <div id="noStealArea">
       <button id="noStealRevealBtn" style="background:rgba(255,255,255,0.12);color:white;width:100%;">
         Niemand klaut – direkt auflösen
@@ -235,7 +228,15 @@
     <button id="revealBtn" disabled>Auflösen</button>
     <button id="nextTurnBtn" disabled>Nächster Spieler</button>
   </div>
-  <div id="timelineOwner" style="text-align:center;opacity:0.7;font-size:0.85em;margin-bottom:4px;"></div>
+
+  <!-- ✅ NEU: Abbrechen-Button im laufenden Spiel -->
+  <div style="text-align:center;margin-top:8px;">
+    <button class="danger" onclick="abortGame()" style="opacity:0.6;font-size:0.85em;padding:10px 18px;">
+      ✕ Spiel abbrechen & neue Playlist laden
+    </button>
+  </div>
+
+  <div id="timelineOwner" style="text-align:center;opacity:0.7;font-size:0.85em;margin-bottom:4px;margin-top:12px;"></div>
   <div id="timelineWrap"><div id="timeline"></div></div>
 </div>
 
@@ -271,13 +272,38 @@ let SONGS=[], accessToken=null;
 const redirectUri = window.location.href.split('?')[0].split('#')[0];
 let players=[], winTarget=10, deck=[], currentTurn=0, pendingSong=null, pendingIndex=null;
 
-// ── ABBRECHEN ──────────────────────────────────────────────
+// ── PLAYLIST ABBRECHEN (vor Spielstart) ────────────────────
 function cancelPlaylist() {
   document.getElementById('playlistInput').value = '';
   document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge einen anderen Playlist-Link ein.';
   document.getElementById('playlistStatus').style.color = '#2ec4b6';
 }
 
+// ── SPIEL ABBRECHEN (im laufenden Spiel) ───────────────────
+function abortGame() {
+  if (!confirm('Spiel wirklich abbrechen und neue Playlist laden?')) return;
+  // Alles zurücksetzen
+  players=[]; deck=[]; pendingSong=null; pendingIndex=null; pendingCardActive=false;
+  stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
+  currentTurn=0; SONGS=[];
+  destroyCurrentController();
+  // Alle Panels ausblenden
+  document.getElementById('game').classList.add('hidden-section');
+  document.getElementById('winnerBox').classList.add('hidden-section');
+  document.getElementById('setup').classList.add('hidden-section');
+  // Playlist-Eingabe wieder zeigen
+  document.getElementById('apiSetup').classList.remove('hidden-section');
+  document.getElementById('playlistInput').value = '';
+  document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge einen anderen Playlist-Link ein.';
+  document.getElementById('playlistStatus').style.color = '#2ec4b6';
+  if (accessToken) {
+    document.getElementById('loginArea').classList.add('hidden-section');
+    document.getElementById('playlistArea').classList.remove('hidden-section');
+  } else {
+    document.getElementById('loginArea').classList.remove('hidden-section');
+    document.getElementById('playlistArea').classList.add('hidden-section');
+  }
+}
 
 // ── UTILS ──────────────────────────────────────────────────
 function isMyTurn() { if(mode!=='companion')return true; if(myPlayerIndex===null)return true; return currentTurn===myPlayerIndex; }
@@ -546,12 +572,10 @@ function startStealing(playerIdx){
   document.getElementById('noStealArea').classList.add('hidden-section');
   document.getElementById('stealPlacementArea').classList.remove('hidden-section');
   document.getElementById('stealReadyBtn').disabled=true;
-  // ✅ Auflösen-Button für ALLE einblenden
   document.getElementById('stealResolveArea').classList.remove('hidden-section');
   renderStealTimeline(); pushState();
 }
 
-// Zeitstrahl des AKTIVEN Spielers anzeigen
 function renderStealTimeline(){
   const tl=document.getElementById('stealTimeline'); tl.innerHTML='';
   if(stealingPlayerIndex===null)return;
@@ -578,7 +602,7 @@ function makeStealPendingCardEl(){ const el=document.createElement('div'); el.cl
 function cancelStealing(){
   stealMode='waiting'; stealingPlayerIndex=null; stealPendingIndex=null;
   document.getElementById('stealPlacementArea').classList.add('hidden-section');
-  document.getElementById('stealResolveArea').classList.add('hidden-section'); // ✅ wieder verstecken
+  document.getElementById('stealResolveArea').classList.add('hidden-section');
   document.getElementById('stealPlayerButtons').classList.remove('hidden-section');
   document.getElementById('noStealArea').classList.remove('hidden-section');
   pushState();
@@ -596,21 +620,21 @@ function renderStealPanelFromState(){
     document.getElementById('stealPlayerButtons').classList.add('hidden-section');
     document.getElementById('noStealArea').classList.add('hidden-section');
     document.getElementById('stealPlacementArea').classList.remove('hidden-section');
-    document.getElementById('stealResolveArea').classList.remove('hidden-section'); // ✅
-    document.getElementById('stealReadyBtn').disabled=(stealPendingIndex===null);
+    document.getElementById('stealResolveArea').classList.remove('hidden-section');
+    document.getElementById('stealReadyBtn').disabled=(stealPendingIndex==null);
     renderStealTimeline();
   } else {
     document.getElementById('stealPlayerButtons').classList.remove('hidden-section');
     document.getElementById('noStealArea').classList.remove('hidden-section');
     document.getElementById('stealPlacementArea').classList.add('hidden-section');
-    document.getElementById('stealResolveArea').classList.add('hidden-section'); // ✅
+    document.getElementById('stealResolveArea').classList.add('hidden-section');
   }
   document.getElementById('stealPanel').classList.remove('hidden-section');
 }
 
+// ✅ FIX: == statt === damit Slot 0 nicht als null gilt
 function resolveWithSteal(){
-  if(pendingIndex===null||stealPendingIndex===null||stealingPlayerIndex===null)return;
-  // Beide gegen Zeitstrahl des aktiven Spielers prüfen
+  if(pendingIndex==null||stealPendingIndex==null||stealingPlayerIndex==null)return;
   const aS=[...players[currentTurn].timeline].sort((a,b)=>a.year-b.year).map(c=>c.year);
   const aL=pendingIndex>0?aS[pendingIndex-1]:-Infinity, aU=pendingIndex<aS.length?aS[pendingIndex]:Infinity;
   const activeCorrect=pendingSong.year>=aL&&pendingSong.year<=aU;
@@ -640,7 +664,7 @@ function resolveWithSteal(){
   stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
   clearBonusGuessInputs();
   document.getElementById('stealPanel').classList.add('hidden-section');
-  document.getElementById('stealResolveArea').classList.add('hidden-section'); // ✅
+  document.getElementById('stealResolveArea').classList.add('hidden-section');
   document.getElementById('stealPlayerButtons').classList.remove('hidden-section');
   renderScoreboard(); renderTimeline();
   document.getElementById('revealBtn').disabled=true;
@@ -656,7 +680,7 @@ document.getElementById('noStealRevealBtn').onclick=()=>{ stealMode=false; steal
 
 // ── NORMALES AUFLÖSEN ──────────────────────────────────────
 function doReveal(remoteGuesses){
-  if(pendingIndex===null){if(mode!=='companion')alert('Wähle erst einen Platz!');return;}
+  if(pendingIndex==null){if(mode!=='companion')alert('Wähle erst einen Platz!');return;}
   const sorted=[...players[currentTurn].timeline].sort((a,b)=>a.year-b.year).map(c=>c.year);
   const lower=pendingIndex>0?sorted[pendingIndex-1]:-Infinity, upper=pendingIndex<sorted.length?sorted[pendingIndex]:Infinity;
   const correct=pendingSong.year>=lower&&pendingSong.year<=upper;
@@ -679,7 +703,7 @@ function doReveal(remoteGuesses){
 }
 
 document.getElementById('revealBtn').onclick=()=>{
-  if(isMultiplayer&&mode==='companion'){ if(!isMyTurn())return; if(pendingIndex===null){alert('Wähle erst einen Platz!');return;} const ag=document.getElementById('artistGuessInput').value,tg=document.getElementById('titleGuessInput').value; document.getElementById('npLabel').textContent='Auflösung angefragt...'; sendCompanionAction('reveal',{artistGuess:ag,titleGuess:tg}); clearBonusGuessInputs(); }
+  if(isMultiplayer&&mode==='companion'){ if(!isMyTurn())return; if(pendingIndex==null){alert('Wähle erst einen Platz!');return;} const ag=document.getElementById('artistGuessInput').value,tg=document.getElementById('titleGuessInput').value; document.getElementById('npLabel').textContent='Auflösung angefragt...'; sendCompanionAction('reveal',{artistGuess:ag,titleGuess:tg}); clearBonusGuessInputs(); }
   else { doReveal(); }
 };
 

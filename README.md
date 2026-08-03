@@ -2,7 +2,7 @@
 
 Ein webbasiertes, lokales Multiplayer-Partyspiel im Stil bekannter Musik-Jahreszahlen-Spiele. Spiele mit deinen Freunden an einem Gerät, errate das Erscheinungsjahr von Songs und baue deinen eigenen Zeitstrahl auf!
 
-Das Besondere: Du bist nicht auf vorgegebene Songs beschränkt. Dank der direkten Spotify-Anbindung kannst du **jede beliebige Spotify-Playlist** nutzen!
+Das Besondere: Du bist nicht auf vorgegebene Songs beschränkt. Dank der direkten Spotify-Anbindung kannst du **jede beliebige Spotify-Playlist** nutzen! Erreichbar unter: Https://silvihi95.github.io/My-Hits3/
 
 ## ✨ Features
 

@@ -208,7 +208,6 @@
         <button class="secondary" id="stealCancelBtn">↩ Doch nicht klauen</button>
       </div>
     </div>
-    <!-- ✅ Auflösen-Button für ALLE sichtbar -->
     <div id="stealResolveArea" class="hidden-section" style="margin-top:8px;">
       <button class="steal" id="stealReadyBtn" style="width:100%;" disabled>
         ✅ Fertig – beide auflösen! (jeder kann drücken)
@@ -229,7 +228,6 @@
     <button id="nextTurnBtn" disabled>Nächster Spieler</button>
   </div>
 
-  <!-- ✅ NEU: Abbrechen-Button im laufenden Spiel -->
   <div style="text-align:center;margin-top:8px;">
     <button class="danger" onclick="abortGame()" style="opacity:0.6;font-size:0.85em;padding:10px 18px;">
       ✕ Spiel abbrechen & neue Playlist laden
@@ -272,26 +270,23 @@ let SONGS=[], accessToken=null;
 const redirectUri = window.location.href.split('?')[0].split('#')[0];
 let players=[], winTarget=10, deck=[], currentTurn=0, pendingSong=null, pendingIndex=null;
 
-// ── PLAYLIST ABBRECHEN (vor Spielstart) ────────────────────
+// ── PLAYLIST ABBRECHEN ─────────────────────────────────────
 function cancelPlaylist() {
   document.getElementById('playlistInput').value = '';
   document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge einen anderen Playlist-Link ein.';
   document.getElementById('playlistStatus').style.color = '#2ec4b6';
 }
 
-// ── SPIEL ABBRECHEN (im laufenden Spiel) ───────────────────
+// ── SPIEL ABBRECHEN ────────────────────────────────────────
 function abortGame() {
   if (!confirm('Spiel wirklich abbrechen und neue Playlist laden?')) return;
-  // Alles zurücksetzen
   players=[]; deck=[]; pendingSong=null; pendingIndex=null; pendingCardActive=false;
   stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
   currentTurn=0; SONGS=[];
   destroyCurrentController();
-  // Alle Panels ausblenden
   document.getElementById('game').classList.add('hidden-section');
   document.getElementById('winnerBox').classList.add('hidden-section');
   document.getElementById('setup').classList.add('hidden-section');
-  // Playlist-Eingabe wieder zeigen
   document.getElementById('apiSetup').classList.remove('hidden-section');
   document.getElementById('playlistInput').value = '';
   document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge einen anderen Playlist-Link ein.';
@@ -325,7 +320,18 @@ function checkWinner(idx) {
 
 // ── FIREBASE SYNC ──────────────────────────────────────────
 function serializeState() {
-  return { players, winTarget, currentTurn, deckCount:deck.length, hasPendingCard:pendingCardActive, pendingIndex, pendingMarker, stealMode:stealMode||false, stealingPlayerIndex, stealPendingIndex, npLabel:document.getElementById('npLabel').textContent, resultClass:document.getElementById('resultBanner').className, resultText:document.getElementById('resultBanner').textContent, revealDisabled:document.getElementById('revealBtn').disabled, nextTurnDisabled:document.getElementById('nextTurnBtn').disabled, winner:document.getElementById('winnerBox').classList.contains('hidden-section')?null:document.getElementById('winnerText').textContent, updatedAt:Date.now() };
+  return {
+    players, winTarget, currentTurn, deckCount:deck.length,
+    hasPendingCard:pendingCardActive, pendingIndex, pendingMarker,
+    stealMode:stealMode||false, stealingPlayerIndex, stealPendingIndex,
+    npLabel:document.getElementById('npLabel').textContent,
+    resultClass:document.getElementById('resultBanner').className,
+    resultText:document.getElementById('resultBanner').textContent,
+    revealDisabled:document.getElementById('revealBtn').disabled,
+    nextTurnDisabled:document.getElementById('nextTurnBtn').disabled,
+    winner:document.getElementById('winnerBox').classList.contains('hidden-section')?null:document.getElementById('winnerText').textContent,
+    updatedAt:Date.now()
+  };
 }
 function pushState() { if(!isMultiplayer||mode!=='host'||!db||!roomCode)return; db.ref('rooms/'+roomCode).set(serializeState()); }
 
@@ -342,6 +348,8 @@ function subscribeHostToPlacement() {
     }
   });
 }
+
+// ✅ ALLE Actions die vom Companion kommen können
 function subscribeHostToActions() {
   db.ref('rooms/'+roomCode+'/actionRequest').on('value', snap=>{
     const val=snap.val();
@@ -349,9 +357,19 @@ function subscribeHostToActions() {
     db.ref('rooms/'+roomCode+'/actionRequest').set(null);
     if(val.type==='reveal') doReveal({artist:val.artistGuess,title:val.titleGuess});
     else if(val.type==='nextTurn') doNextTurn();
+    else if(val.type==='resolveSteal') resolveWithSteal();
+    else if(val.type==='cancelSteal') cancelStealing();
+    else if(val.type==='noStealReveal') {
+      stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
+      document.getElementById('stealPanel').classList.add('hidden-section');
+      doReveal();
+    }
   });
 }
-function sendCompanionAction(type,extra) { db.ref('rooms/'+roomCode+'/actionRequest').set(Object.assign({type,ts:Date.now()},extra||{})); }
+
+function sendCompanionAction(type,extra) {
+  db.ref('rooms/'+roomCode+'/actionRequest').set(Object.assign({type,ts:Date.now()},extra||{}));
+}
 
 async function joinRoom() {
   const c=document.getElementById('joinCodeInput').value.trim();
@@ -385,14 +403,19 @@ function renderFromSnapshot(data) {
       const bw=document.getElementById('playerPickButtons'); bw.innerHTML='';
       players.forEach((p,idx)=>{ const b=document.createElement('button'); b.textContent=p.name; b.onclick=(i=>()=>pickMyPlayer(i))(idx); bw.appendChild(b); });
     } else { document.getElementById('playerPickPanel').classList.add('hidden-section'); }
-    if(myPlayerIndex!==null&&players[myPlayerIndex]) document.getElementById('roleBanner').textContent='Mitspieler-Handy · Du spielst als '+players[myPlayerIndex].name+' · Raum '+roomCode;
+    if(myPlayerIndex!==null&&players[myPlayerIndex])
+      document.getElementById('roleBanner').textContent='Mitspieler-Handy · Du spielst als '+players[myPlayerIndex].name+' · Raum '+roomCode;
   }
 
   renderScoreboard(); renderTimeline(); updateDeckCount();
 
   const ea=document.getElementById('embedArea');
   if(pendingCardActive){
-    if(ea.dataset.marker!==String(data.pendingMarker)){ ea.dataset.marker=String(data.pendingMarker); ea.innerHTML='<div class="embedWrap"><div class="embedOverlay">🎵</div></div>'; clearBonusGuessInputs(); }
+    if(ea.dataset.marker!==String(data.pendingMarker)){
+      ea.dataset.marker=String(data.pendingMarker);
+      ea.innerHTML='<div class="embedWrap"><div class="embedOverlay">🎵</div></div>';
+      clearBonusGuessInputs();
+    }
   } else { ea.innerHTML=''; ea.dataset.marker=''; }
 
   document.getElementById('npLabel').textContent=data.npLabel||'Bereit?';
@@ -410,11 +433,22 @@ function renderFromSnapshot(data) {
   const banner=document.getElementById('resultBanner');
   banner.className=data.resultClass||''; banner.textContent=data.resultText||'';
 
-  if(stealMode){ renderStealPanelFromState(); } else { document.getElementById('stealPanel').classList.add('hidden-section'); }
-  if(data.winner){ document.getElementById('game').classList.add('hidden-section'); document.getElementById('winnerBox').classList.remove('hidden-section'); document.getElementById('winnerText').textContent=data.winner; }
+  if(stealMode){ renderStealPanelFromState(); }
+  else { document.getElementById('stealPanel').classList.add('hidden-section'); }
+
+  if(data.winner){
+    document.getElementById('game').classList.add('hidden-section');
+    document.getElementById('winnerBox').classList.remove('hidden-section');
+    document.getElementById('winnerText').textContent=data.winner;
+  }
 }
 
-function pickMyPlayer(idx) { myPlayerIndex=idx; window.localStorage.setItem('my_player_index_'+roomCode,String(idx)); document.getElementById('playerPickPanel').classList.add('hidden-section'); if(lastSnapshotData)renderFromSnapshot(lastSnapshotData); }
+function pickMyPlayer(idx) {
+  myPlayerIndex=idx;
+  window.localStorage.setItem('my_player_index_'+roomCode,String(idx));
+  document.getElementById('playerPickPanel').classList.add('hidden-section');
+  if(lastSnapshotData)renderFromSnapshot(lastSnapshotData);
+}
 
 // ── SPOTIFY AUTH ───────────────────────────────────────────
 const DEFAULT_CLIENT_ID='c16024b7e9ef498d8b1362b99a50f546';
@@ -474,7 +508,13 @@ document.getElementById('startBtn').onclick=()=>{
   currentTurn=0;
   document.getElementById('setup').classList.add('hidden-section');
   document.getElementById('game').classList.remove('hidden-section');
-  if(document.getElementById('multiplayerToggle').checked){ mode='host'; isMultiplayer=true; roomCode=String(Math.floor(1000+Math.random()*9000)); db=initFirebaseIfNeeded(); subscribeHostToPlacement(); subscribeHostToActions(); document.getElementById('roleBanner').textContent='Haupt-Handy · Code: '+roomCode; }
+  if(document.getElementById('multiplayerToggle').checked){
+    mode='host'; isMultiplayer=true;
+    roomCode=String(Math.floor(1000+Math.random()*9000));
+    db=initFirebaseIfNeeded();
+    subscribeHostToPlacement(); subscribeHostToActions();
+    document.getElementById('roleBanner').textContent='Haupt-Handy · Code: '+roomCode;
+  }
   renderScoreboard(); renderTimeline(); updateDeckCount(); pushState();
 };
 
@@ -632,7 +672,6 @@ function renderStealPanelFromState(){
   document.getElementById('stealPanel').classList.remove('hidden-section');
 }
 
-// ✅ FIX: == statt === damit Slot 0 nicht als null gilt
 function resolveWithSteal(){
   if(pendingIndex==null||stealPendingIndex==null||stealingPlayerIndex==null)return;
   const aS=[...players[currentTurn].timeline].sort((a,b)=>a.year-b.year).map(c=>c.year);
@@ -674,9 +713,27 @@ function resolveWithSteal(){
   pushState();
 }
 
-document.getElementById('stealReadyBtn').onclick=resolveWithSteal;
-document.getElementById('stealCancelBtn').onclick=cancelStealing;
-document.getElementById('noStealRevealBtn').onclick=()=>{ stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null; document.getElementById('stealPanel').classList.add('hidden-section'); doReveal(); };
+// ✅ Alle Buttons leiten beim Companion über Firebase weiter
+document.getElementById('stealReadyBtn').onclick=()=>{
+  if(isMultiplayer&&mode==='companion'){
+    document.getElementById('npLabel').textContent='Auflösung angefragt...';
+    sendCompanionAction('resolveSteal');
+  } else { resolveWithSteal(); }
+};
+document.getElementById('stealCancelBtn').onclick=()=>{
+  if(isMultiplayer&&mode==='companion'){
+    sendCompanionAction('cancelSteal');
+  } else { cancelStealing(); }
+};
+document.getElementById('noStealRevealBtn').onclick=()=>{
+  if(isMultiplayer&&mode==='companion'){
+    sendCompanionAction('noStealReveal');
+  } else {
+    stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
+    document.getElementById('stealPanel').classList.add('hidden-section');
+    doReveal();
+  }
+};
 
 // ── NORMALES AUFLÖSEN ──────────────────────────────────────
 function doReveal(remoteGuesses){

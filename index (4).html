@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>My-Hits</title>
+
+<!-- PWA: Installierbar auf Handy-Homescreen -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#14324d">
+<link rel="icon" href="icon-192.png">
+
+<!-- iOS-spezifisch: "Zum Home-Bildschirm" -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="My-Hits">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+  :root { --card-bg: #ffde59; --card-text: #1a1a1a; --accent: #ff5757; --accent2: #2ec4b6; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; font-family: 'Segoe UI', Arial, sans-serif; background: radial-gradient(circle at top, #14324d, #071019 80%); color: white; min-height: 100vh; padding: 16px; padding-top: max(16px, env(safe-area-inset-top)); padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+  h1 { text-align: center; font-size: 1.5em; margin-bottom: 4px; color: #ffde59; text-shadow: 0 0 12px rgba(255,222,89,0.5); }
+  .subtitle { text-align:center; opacity:0.75; margin-bottom: 18px; font-size:0.82em;}
+  #apiSetup, #setup, #game { max-width: 900px; margin: 0 auto; }
+  .panel { background: rgba(255,255,255,0.06); border-radius: 16px; padding: 16px; margin-bottom: 14px; backdrop-filter: blur(4px); }
+  label { display:block; margin: 10px 0 4px; font-weight:600; }
+  input[type=text], input[type=number] { width: 100%; padding: 12px; border-radius: 8px; border: none; font-size: 16px; margin-bottom: 10px;}
+  .playerRow { display:flex; gap:8px; margin-bottom:6px; }
+  .playerRow input { flex:1; margin-bottom: 0; }
+  button { cursor: pointer; border: none; border-radius: 10px; padding: 13px 18px; font-size: 1em; font-weight: 700; background: var(--accent2); color: #06282a; transition: transform 0.15s ease, filter 0.15s ease; min-height: 46px; touch-action: manipulation; }
+  button:hover { transform: translateY(-2px); filter: brightness(1.1); }
+  button:active { transform: scale(0.97); filter: brightness(1.15); }
+  button.secondary { background: #ffde59; color:#3a2b00; }
+  button.danger { background: var(--accent); color:white; min-width: 46px; }
+  button:disabled { opacity: 0.4; cursor:not-allowed; transform:none; }
+  
+  #scoreboard { display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom: 14px; }
+  .playerBadge { padding: 8px 14px; border-radius: 30px; background: rgba(255,255,255,0.08); font-weight:600; border: 2px solid transparent; }
+  .playerBadge.active { border-color:#ffde59; background: rgba(255,222,89,0.18); }
+  .playerBadge .count { color:#2ec4b6; margin-left:6px; }
+  
+  #controls { display:flex; justify-content:center; gap:10px; margin-bottom: 16px; flex-wrap:wrap; }
+  #controls button { flex: 1 1 140px; }
+  #deckCount { text-align:center; opacity:0.6; font-size:0.85em; margin-bottom:10px; }
+  #timelineWrap { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 18px 8px 26px; background: rgba(0,0,0,0.25); border-radius: 16px; }
+  #timeline { display:flex; align-items:center; min-height: 140px; width: max-content; padding: 0 16px; }
+  
+  .slot { width: 70px; min-width: 70px; height: 120px; display:flex; align-items:center; justify-content:center; position: relative; margin: 0 4px; }
+  .slot .dropline { width: 100%; height: 100%; background: rgba(255,255,255,0.03); border: 2px dashed rgba(255,255,255,0.3); border-radius: 14px; transition: all 0.15s; display: flex; align-items: center; justify-content: center; }
+  .slot .dropline::after { content: "Hier ablegen"; font-size: 0.65em; color: rgba(255,255,255,0.4); text-align: center; padding: 0 4px; }
+  .slot.dragover .dropline { background: rgba(255,222,89,0.15); border-color: #ffde59; border-width: 3px; box-shadow: 0 0 12px rgba(255,222,89,0.3); }
+  
+  .card { width: 100px; height: 120px; background: linear-gradient(160deg, var(--card-bg), #ffb703); color: var(--card-text); border-radius: 14px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:8px; box-shadow: 0 6px 14px rgba(0,0,0,0.4); cursor: grab; flex-shrink:0; position: relative; user-select:none; }
+  .card .year { font-size: 1.6em; font-weight:800; }
+  .card .title { font-size: 0.65em; font-weight:600; margin-top:4px; line-height:1.1; }
+  .card .artist { font-size: 0.58em; opacity:0.75; }
+  .card.hidden .year, .card.hidden .title, .card.hidden .artist { visibility: hidden; }
+  .card.hidden::after { content: "?"; position:absolute; font-size: 2.4em; font-weight:900; color: rgba(0,0,0,0.35); }
+  .card.pending { outline: 3px dashed #ff5757; animation: pulse 1.2s infinite; }
+  .card.dragging { opacity: 0.3; }
+  @keyframes pulse { 0%,100%{box-shadow:0 0 0 rgba(255,87,87,0.6);} 50%{box-shadow:0 0 18px rgba(255,87,87,0.9);} }
+  
+  #nowPlaying { text-align:center; margin-bottom: 14px; font-size:1.1em; }
+  #nowPlaying .hint { opacity:0.6; font-size:0.85em; }
+  .embedWrap { position: relative; margin: 12px 0; }
+  .embedOverlay { position:absolute; top:0; left:0; width:100%; height:100%; background: linear-gradient(160deg, var(--card-bg), #ffb703); border-radius: 12px; display:flex; align-items:center; justify-content:center; font-size: 2.2em; font-weight:900; color: rgba(0,0,0,0.4); z-index: 5; cursor:pointer; user-select:none; }
+  .embedOverlay:hover { filter: brightness(1.08); }
+  iframe.spotifyFrame { border-radius:12px; width:100%; height:152px; border:0; }
+  
+  #resultBanner { text-align:center; padding: 10px; border-radius:10px; font-weight:700; margin-bottom:10px; display:none; }
+  #resultBanner.show { display:block; }
+  #resultBanner.ok { background: rgba(46,196,182,0.25); color:#2ec4b6; }
+  #resultBanner.bad { background: rgba(255,87,87,0.25); color:#ff5757; }
+  #winnerBox { text-align:center; }
+  #winnerBox h2 { color:#ffde59; }
+  
+  .hidden-section { display:none !important; }
+
+  @media (max-width: 400px) {
+    body { padding: 12px; }
+    h1 { font-size: 1.3em; }
+    .panel { padding: 12px; border-radius: 14px; }
+    #controls button { flex-basis: 100%; }
+    .embedOverlay { font-size: 1.8em; }
+    .playerBadge { padding: 6px 10px; font-size: 0.9em; }
+  }
+</style>
+</head>
+<body>
+
+<h1>My-Hits</h1>
+<div class="subtitle">Automatische Playlist-Anbindung · Timeline-Kartenspiel</div>
+
+<!-- ZWEITES HANDY VERBINDEN -->
+<div id="joinPanel" class="panel" style="max-width:900px;margin:0 auto 16px;">
+  <h3>Schon ein Spiel auf einem anderen Handy gestartet?</h3>
+  <p style="font-size:0.85em;opacity:0.8;">Dann gib hier den 4-stelligen Code ein, um dieses Handy live mitlaufen zu lassen.</p>
+  <div style="display:flex; gap:8px;">
+    <input type="text" id="joinCodeInput" placeholder="z.B. 4821" maxlength="4" style="margin-bottom:0;">
+    <button class="secondary" onclick="joinRoom()">Verbinden</button>
+  </div>
+  <p id="joinStatus" style="font-size:0.85em; margin-top:8px;"></p>
+</div>
+
+<!-- SPOTIFY API SETUP -->
+<div id="apiSetup">
+  <div class="panel">
+    <h3>Schritt 1: Spotify-Playlist laden</h3>
+    
+    <div id="loginArea">
+      <p style="font-size: 0.9em; opacity: 0.8;">Um die Songs automatisch samt Jahr und Player zu importieren, logge dich kurz bei Spotify ein.</p>
+      <button class="secondary" onclick="loginSpotify()">Mit Spotify einloggen</button>
+
+      <details style="margin-top:14px;">
+        <summary style="cursor:pointer; font-size:0.85em; opacity:0.85;">Du willst selbst hosten, aber "Verbindungsfehler / nicht erlaubt"? Hier klicken</summary>
+        <div style="margin-top:10px; font-size:0.85em; opacity:0.85; line-height:1.5;">
+          <p>Der Ersteller dieses Spiels kann nur 5 Personen Zugriff geben. Wenn ihr öfter zu mehreren ohne die Erstellerin hosten wollt, kann sich jede Person <strong>kostenlos ihre eigene Mini-Spotify-App</strong> anlegen (5 Min., braucht Spotify Premium):</p>
+          <ol style="padding-left:18px; margin:8px 0;">
+            <li><a href="https://developer.spotify.com/dashboard" target="_blank" style="color:#ffde59;">developer.spotify.com/dashboard</a> öffnen, einloggen</li>
+            <li>"Create app" klicken, beliebigen Namen eingeben</li>
+            <li>Als <strong>Redirect URI</strong> genau diese Adresse eintragen: <code id="redirectUriHint" style="word-break:break-all;"></code></li>
+            <li>"Web API" als API auswählen, speichern</li>
+            <li>Client-ID kopieren und unten einfügen</li>
+          </ol>
+          <label>Eigene Spotify Client-ID (optional):</label>
+          <input type="text" id="customClientIdInput" placeholder="z.B. 1a2b3c4d5e6f...">
+          <button class="secondary" onclick="saveCustomClientId()">Speichern & verwenden</button>
+          <p id="customClientIdStatus" style="margin-top:6px;"></p>
+        </div>
+      </details>
+    </div>
+
+    <div id="playlistArea" class="hidden-section">
+      <p style="color: #2ec4b6; font-weight: bold;" id="playlistStatus">✓ Erfolgreich mit Spotify verbunden!</p>
+      <label>Spotify Playlist Link einfügen:</label>
+      <input type="text" id="playlistInput" placeholder="https://open.spotify.com/playlist/37i9dQZF1DXcK1zT7iP663...">
+      <button onclick="loadPlaylist()">Lieder importieren</button>
+    </div>
+  </div>
+</div>
+
+<!-- PLAYER SETUP -->
+<div id="setup" class="hidden-section">
+  <div class="panel">
+    <h3>Schritt 2: Spieler</h3>
+    <div id="playerInputs"></div>
+    <button class="secondary" id="addPlayerBtn">+ Spieler</button>
+  </div>
+  <div class="panel">
+    <h3>Einstellungen</h3>
+    <label>Karten zum Sieg (Empfehlung: 10)</label>
+    <input type="number" id="winTarget" value="10" min="3" max="45">
+  </div>
+  <div class="panel">
+    <h3>Mehrspieler</h3>
+    <label style="display:flex; align-items:center; gap:8px; font-weight:normal; margin-bottom:0;">
+      <input type="checkbox" id="multiplayerToggle" style="width:auto; margin:0;"> Mit zweitem Handy synchronisieren
+    </label>
+  </div>
+  <div style="text-align:center;">
+    <button id="startBtn">Spiel starten</button>
+  </div>
+</div>
+
+<!-- GAME -->
+<div id="game" class="hidden-section">
+  <div id="roleBanner" style="text-align:center;opacity:0.75;font-size:0.9em;margin-bottom:8px;"></div>
+
+  <div id="playerPickPanel" class="panel hidden-section" style="text-align:center;">
+    <h3>Wer bist du?</h3>
+    <p style="font-size:0.85em;opacity:0.8;">Wähle deinen Spielernamen, damit du nur an deinem eigenen Zug mitmachen kannst.</p>
+    <div id="playerPickButtons" style="display:flex; flex-wrap:wrap; gap:8px; justify-content:center;"></div>
+  </div>
+
+  <div id="waitTurnBanner" class="panel hidden-section" style="text-align:center; font-weight:700;"></div>
+
+  <div id="scoreboard"></div>
+  <div id="resultBanner"></div>
+  <div id="nowPlaying" class="panel">
+    <div id="npLabel">Bereit?</div>
+    <div id="embedArea"></div>
+    <div class="hint">Klicke auf das gelbe Feld, um den Song abzuspielen. Klicke dann auf die Stelle in der Timeline.</div>
+    <div id="bonusGuessArea" style="margin-top:10px; text-align:left;">
+      <label style="margin-bottom:4px;">🎯 Bonus (optional): Interpret & Songtitel raten</label>
+      <input type="text" id="artistGuessInput" placeholder="Interpret">
+      <input type="text" id="titleGuessInput" placeholder="Songtitel" style="margin-bottom:0;">
+    </div>
+  </div>
+  <div id="deckCount"></div>
+  <div id="controls">
+    <button id="drawBtn">Nächsten Song ziehen</button>
+    <button id="swapBtn" class="secondary" disabled>🔄 Song tauschen</button>
+    <button id="revealBtn" disabled>Auflösen</button>
+    <button id="nextTurnBtn" disabled>Nächster Spieler</button>
+  </div>
+   <div id="timelineOwner"></div>
+  <div id="timelineWrap">
+    <div id="timeline"></div>
+  </div>
+  
+</div>
+
+<div id="winnerBox" class="panel hidden-section">
+  <h2 id="winnerText"></h2>
+  <button onclick="location.reload()">Neues Spiel</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
+<script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
+<script>
+// ==========================================
+// FIREBASE CONFIG (Mehrspieler-Sync)
+// ==========================================
+const firebaseConfig = {
+  apiKey: "AIzaSyCFbhWWxdt4l_Wi3nT7zXmcow6hQR-c81U",
+  authDomain: "my-hits-5dd73.firebaseapp.com",
+  databaseURL: "https://my-hits-5dd73-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "my-hits-5dd73",
+  storageBucket: "my-hits-5dd73.firebasestorage.app",
+  messagingSenderId: "657094772055",
+  appId: "1:657094772055:web:2e6aee2fc10b8f50b32a12"
+};
+// ==========================================
+
+let firebaseApp = null;
+function initFirebaseIfNeeded() {
+  if (!firebaseApp) {
+    firebaseApp = firebase.initializeApp(firebaseConfig);
+  }
+  return firebase.database();
+}
+
+let mode = null;         // 'host' oder 'companion'
+let isMultiplayer = false;
+let roomCode = null;
+let db = null;
+let pendingMarker = 0;   // eindeutige Kennung fuer jede gezogene Karte (fuers 2. Handy)
+let pendingCardActive = false; // true solange eine geheime Karte offen ist (ersetzt pendingSong-Check fuers Rendering)
+let myPlayerIndex = null; // Companion: an welchen Spieler dieses Handy fest gebunden ist
+let lastSnapshotData = null; // Companion: letzter empfangener Zustand (fuer Re-Render nach Spielerwahl)
+
+function isMyTurn() {
+  if (mode !== 'companion') return true;
+  if (myPlayerIndex === null) return true;
+  return currentTurn === myPlayerIndex;
+}
+
+// --- Bonus-Raten: Interpret & Songtitel (nachsichtiger Vergleich) ---
+function normalizeGuess(s) {
+  return (s || '')
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Umlaute/Akzente vereinheitlichen
+    .replace(/[^a-z0-9]/g, '')
+    .trim();
+}
+function guessMatches(guess, actual) {
+  const g = normalizeGuess(guess);
+  const a = normalizeGuess(actual);
+  if (!g || !a) return false;
+  return a.includes(g) || g.includes(a);
+}
+function clearBonusGuessInputs() {
+  const a = document.getElementById('artistGuessInput');
+  const t = document.getElementById('titleGuessInput');
+  if (a) a.value = '';
+  if (t) t.value = '';
+}
+
+function pickMyPlayer(idx) {
+  myPlayerIndex = idx;
+  window.localStorage.setItem('my_player_index_' + roomCode, String(idx));
+  document.getElementById('playerPickPanel').classList.add('hidden-section');
+  if (lastSnapshotData) renderFromSnapshot(lastSnapshotData);
+}
+
+function serializeState() {
+  return {
+    players, winTarget, currentTurn,
+    deckCount: deck.length,
+    hasPendingCard: pendingCardActive,
+    pendingIndex,
+    pendingMarker,
+    npLabel: document.getElementById('npLabel').textContent,
+    resultClass: document.getElementById('resultBanner').className,
+    resultText: document.getElementById('resultBanner').textContent,
+    revealDisabled: document.getElementById('revealBtn').disabled,
+    nextTurnDisabled: document.getElementById('nextTurnBtn').disabled,
+    winner: document.getElementById('winnerBox').classList.contains('hidden-section') ? null : document.getElementById('winnerText').textContent,
+    updatedAt: Date.now()
+  };
+}
+
+function pushState() {
+  if (!isMultiplayer || mode !== 'host' || !db || !roomCode) return;
+  db.ref('rooms/' + roomCode).set(serializeState());
+}
+
+function subscribeHostToPlacement() {
+  db.ref('rooms/' + roomCode + '/placementRequest').on('value', (snap) => {
+    const val = snap.val();
+    if (val !== null && val !== undefined && pendingCardActive) {
+      pendingIndex = parseInt(val);
+      document.getElementById('npLabel').textContent = `Karte platziert (vom 2. Handy). Klicke "Auflösen"!`;
+      renderTimeline();
+      db.ref('rooms/' + roomCode + '/placementRequest').set(null);
+      pushState();
+    }
+  });
+}
+
+function subscribeHostToActions() {
+  db.ref('rooms/' + roomCode + '/actionRequest').on('value', (snap) => {
+    const val = snap.val();
+    if (!val || !val.type) return;
+    db.ref('rooms/' + roomCode + '/actionRequest').set(null);
+    if (val.type === 'reveal') doReveal({ artist: val.artistGuess, title: val.titleGuess });
+    else if (val.type === 'nextTurn') doNextTurn();
+  });
+}
+
+function sendCompanionAction(type, extra) {
+  db.ref('rooms/' + roomCode + '/actionRequest').set(Object.assign({ type, ts: Date.now() }, extra || {}));
+}
+
+async function joinRoom() {
+  const codeInput = document.getElementById('joinCodeInput').value.trim();
+  if (!/^[0-9]{4}$/.test(codeInput)) {
+    document.getElementById('joinStatus').textContent = 'Bitte den 4-stelligen Code vom Haupt-Handy eingeben.';
+    return;
+  }
+  roomCode = codeInput; mode = 'companion'; isMultiplayer = true;
+  const savedIdx = window.localStorage.getItem('my_player_index_' + roomCode);
+  myPlayerIndex = (savedIdx !== null) ? parseInt(savedIdx) : null;
+  document.getElementById('joinStatus').textContent = 'Verbinde...';
+  db = initFirebaseIfNeeded();
+
+  document.getElementById('joinPanel').classList.add('hidden-section');
+  document.getElementById('apiSetup').classList.add('hidden-section');
+  document.getElementById('setup').classList.add('hidden-section');
+  document.getElementById('game').classList.remove('hidden-section');
+  document.getElementById('drawBtn').style.display = 'none';
+  document.getElementById('swapBtn').style.display = 'none';
+  document.getElementById('roleBanner').textContent = `Mitspieler-Handy · Raum ${roomCode}`;
+  document.getElementById('npLabel').textContent = 'Warte auf Haupt-Handy...';
+
+  db.ref('rooms/' + roomCode).on('value', (snap) => {
+    const data = snap.val();
+    if (!data) return;
+    renderFromSnapshot(data);
+  });
+}
+
+function renderFromSnapshot(data) {
+  lastSnapshotData = data;
+  players = data.players || [];
+  winTarget = data.winTarget || 10;
+  currentTurn = data.currentTurn || 0;
+  deck = new Array(data.deckCount || 0);
+  pendingCardActive = !!data.hasPendingCard;
+  pendingIndex = (data.pendingIndex === undefined || data.pendingIndex === null) ? null : data.pendingIndex;
+
+  // Spielerauswahl anzeigen, falls Companion noch keinem Spieler zugeordnet ist
+  if (mode === 'companion') {
+    if (myPlayerIndex === null && players.length > 0) {
+      document.getElementById('playerPickPanel').classList.remove('hidden-section');
+      const btnWrap = document.getElementById('playerPickButtons');
+      btnWrap.innerHTML = '';
+      players.forEach((p, idx) => {
+        const b = document.createElement('button');
+        b.textContent = p.name;
+        b.onclick = () => pickMyPlayer(idx);
+        btnWrap.appendChild(b);
+      });
+    } else {
+      document.getElementById('playerPickPanel').classList.add('hidden-section');
+    }
+
+    if (myPlayerIndex !== null && players[myPlayerIndex]) {
+      document.getElementById('roleBanner').textContent = `Mitspieler-Handy · Du spielst als ${players[myPlayerIndex].name} · Raum ${roomCode}`;
+    } else {
+      document.getElementById('roleBanner').textContent = `Mitspieler-Handy · Raum ${roomCode}`;
+    }
+  }
+
+  renderScoreboard();
+  renderTimeline();
+  updateDeckCount();
+
+  const embedArea = document.getElementById('embedArea');
+  if (pendingCardActive) {
+    if (embedArea.dataset.marker !== String(data.pendingMarker)) {
+      embedArea.dataset.marker = String(data.pendingMarker);
+      embedArea.innerHTML = `<div class="embedWrap"><div class="embedOverlay">🎵</div></div>`;
+      clearBonusGuessInputs();
+    }
+  } else {
+    embedArea.innerHTML = '';
+    embedArea.dataset.marker = '';
+  }
+
+  document.getElementById('npLabel').textContent = data.npLabel || 'Bereit?';
+  document.getElementById('revealBtn').disabled = !!data.revealDisabled;
+  document.getElementById('nextTurnBtn').disabled = !!data.nextTurnDisabled;
+
+  // Turn-Sperre fuers gebundene Companion-Handy: nur aktiv, wenn man selbst dran ist
+  const waitBanner = document.getElementById('waitTurnBanner');
+  if (mode === 'companion' && myPlayerIndex !== null && !isMyTurn()) {
+    waitBanner.classList.remove('hidden-section');
+    waitBanner.textContent = `${players[currentTurn] ? players[currentTurn].name : ''} ist gerade dran - du schaust zu.`;
+    document.getElementById('revealBtn').disabled = true;
+    document.getElementById('nextTurnBtn').disabled = true;
+  } else {
+    waitBanner.classList.add('hidden-section');
+  }
+
+  const banner = document.getElementById('resultBanner');
+  banner.className = data.resultClass || '';
+  banner.textContent = data.resultText || '';
+
+  if (data.winner) {
+    document.getElementById('game').classList.add('hidden-section');
+    document.getElementById('winnerBox').classList.remove('hidden-section');
+    document.getElementById('winnerText').textContent = data.winner;
+  }
+}
+
+// ==========================================
+// STANDARD-CLIENT-ID (der Ersteller dieses Spiels). Wer eine eigene Client-ID
+// unten im "Selbst hosten"-Feld einträgt, überschreibt das nur in seinem eigenen
+// Browser (localStorage) - der Standardwert hier bleibt fuer alle anderen unveraendert.
+// ==========================================
+const DEFAULT_CLIENT_ID = '6758375bc1774c9d92bc7f67a78bf011';
+// ==========================================
+
+function getActiveClientId() {
+  return window.localStorage.getItem('custom_client_id') || DEFAULT_CLIENT_ID;
+}
+
+function saveCustomClientId() {
+  const val = document.getElementById('customClientIdInput').value.trim();
+  const statusEl = document.getElementById('customClientIdStatus');
+  if (!val) {
+    window.localStorage.removeItem('custom_client_id');
+    statusEl.textContent = 'Zurückgesetzt auf Standard-App.';
+    statusEl.style.color = 'white';
+    return;
+  }
+  window.localStorage.setItem('custom_client_id', val);
+  statusEl.textContent = '✓ Gespeichert! Klicke jetzt auf "Mit Spotify einloggen".';
+  statusEl.style.color = '#2ec4b6';
+}
+
+let SONGS = []; 
+let accessToken = null;
+const redirectUri = window.location.href.split('?')[0].split('#')[0]; 
+
+// Redirect-URI-Hinweis im "Selbst hosten"-Kasten anzeigen und gespeicherte Client-ID vorausfuellen
+document.addEventListener('DOMContentLoaded', () => {
+  const hint = document.getElementById('redirectUriHint');
+  if (hint) hint.textContent = redirectUri;
+  const savedCustom = window.localStorage.getItem('custom_client_id');
+  const inputEl = document.getElementById('customClientIdInput');
+  if (savedCustom && inputEl) inputEl.value = savedCustom;
+});
+
+// --- Spotify OAuth PKCE Login Logik (Neuer Standard) ---
+function generateRandomString(length) {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  for (let i = 0; i < length; i++) text += possible.charAt(Math.floor(Math.random() * possible.length));
+  return text;
+}
+
+async function generateCodeChallenge(codeVerifier) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(codeVerifier);
+  const digest = await window.crypto.subtle.digest('SHA-256', data);
+  return btoa(String.fromCharCode.apply(null, [...new Uint8Array(digest)]))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+async function loginSpotify() {
+  const CLIENT_ID = getActiveClientId();
+  const codeVerifier = generateRandomString(64);
+  window.localStorage.setItem('code_verifier', codeVerifier);
+  const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+  const params = new URLSearchParams({
+    client_id: CLIENT_ID,
+    response_type: 'code',
+    redirect_uri: redirectUri,
+    scope: 'user-read-private playlist-read-private playlist-read-collaborative',
+    code_challenge_method: 'S256',
+    show_dialog: 'true',
+    code_challenge: codeChallenge
+  });
+  window.location.href = `https://accounts.spotify.com/authorize?${params.toString()}`;
+}
+
+const urlParams = new URLSearchParams(window.location.search);
+const code = urlParams.get('code');
+
+if (code) {
+  document.getElementById('loginArea').classList.add('hidden-section');
+  document.getElementById('playlistArea').classList.remove('hidden-section');
+  document.getElementById('playlistStatus').innerText = "Authentifiziere...";
+  exchangeToken(code);
+  window.history.replaceState({}, document.title, redirectUri);
+}
+
+async function exchangeToken(code) {
+  const codeVerifier = window.localStorage.getItem('code_verifier');
+  const body = new URLSearchParams({
+    client_id: getActiveClientId(),
+    grant_type: 'authorization_code',
+    code: code,
+    redirect_uri: redirectUri,
+    code_verifier: codeVerifier
+  });
+
+  try {
+    const response = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body
+    });
+    const data = await response.json();
+    if (data.access_token) {
+      accessToken = data.access_token;
+      document.getElementById('playlistStatus').innerText = "✓ Erfolgreich verbunden! Füge nun den Playlist-Link ein.";
+      document.getElementById('playlistStatus').style.color = "#2ec4b6";
+    } else {
+      throw new Error("Token Error");
+    }
+  } catch(e) {
+    document.getElementById('playlistStatus').innerText = "Fehler bei der Verbindung mit Spotify.";
+    document.getElementById('playlistStatus').style.color = "#ff5757";
+  }
+}
+
+// --- Playlist laden ---
+// Spotify hat im Februar 2026 den Endpoint /playlists/{id}/tracks durch /playlists/{id}/items ersetzt.
+// Die alte Route liefert seither bei allen Development-Mode-Apps 403 Forbidden.
+async function loadPlaylist() {
+  const input = document.getElementById('playlistInput').value;
+  const match = input.match(/playlist\/([a-zA-Z0-9]+)/);
+  if (!match) { alert("Das ist kein gültiger Spotify-Playlist-Link!"); return; }
+  const playlistId = match[1];
+
+  const statusEl = document.getElementById('playlistStatus');
+  statusEl.innerText = "Lade Lieder aus Spotify...";
+  statusEl.style.color = "white";
+
+  try {
+    const res = await fetch(`https://api.spotify.com/v1/playlists/${playlistId}/items?limit=100`, {
+      headers: { 'Authorization': 'Bearer ' + accessToken }
+    });
+    const data = await res.json();
+    
+    // Wirft jetzt die echte Fehlermeldung von Spotify aus!
+    if(data.error) throw new Error(data.error.message);
+
+    SONGS = [];
+    data.items.forEach(entry => {
+      // Neues Antwortformat seit Feb 2026: "item" statt "track"
+      const t = entry && entry.item;
+      if (t && t.id) {
+        let songYear = 2024; // Notfall-Jahr, falls Spotify kein Datum hat
+        if (t.album && t.album.release_date) {
+          songYear = parseInt(t.album.release_date.split('-')[0]);
+        }
+        SONGS.push({
+          title: t.name || "Unbekannt",
+          artist: t.artists ? t.artists.map(a => a.name).join(', ') : "Unbekannt",
+          year: songYear,
+          id: t.id
+        });
+      }
+    });
+
+    if (SONGS.length < 5) {
+      throw new Error("Zu wenige abspielbare Lieder gefunden. Hinweis: Spotify liefert seit Februar 2026 Inhalte nur noch fuer Playlists, die du selbst erstellt hast.");
+    }
+
+    statusEl.style.color = "#2ec4b6";
+    statusEl.innerText = `${SONGS.length} Lieder erfolgreich geladen! Weiter geht's.`;
+    
+    setTimeout(() => {
+      document.getElementById('apiSetup').classList.add('hidden-section');
+      document.getElementById('setup').classList.remove('hidden-section');
+    }, 1500);
+
+  } catch(e) {
+    statusEl.style.color = "#ff5757";
+    // Hier ist der Trick: Er schreibt uns jetzt GENAU hin, was das Problem ist!
+    statusEl.innerText = "Fehler: " + e.message;
+  }
+}
+
+// --- Player & Game Setup ---
+const playerInputs = document.getElementById('playerInputs');
+function addPlayerRow(name) {
+  const row = document.createElement('div');
+  row.className = 'playerRow';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.placeholder = 'Spielername'; inp.value = name || '';
+  const rm = document.createElement('button'); rm.textContent = 'X'; rm.className = 'danger';
+  rm.onclick = () => row.remove();
+  row.appendChild(inp); row.appendChild(rm);
+  playerInputs.appendChild(row);
+}
+addPlayerRow('Spieler 1'); addPlayerRow('Spieler 2');
+document.getElementById('addPlayerBtn').onclick = () => addPlayerRow('');
+
+let players = [], winTarget = 10, deck = [], currentTurn = 0, pendingSong = null, pendingIndex = null;
+
+const winnerPhrases = [
+  "Absolute Playlist-Legende!",
+  "Diese Ohren hören Jahreszahlen wie ein Shazam auf zwei Beinen!",
+  "Da hat wohl jemand ein musikalisches Näschen!",
+  "Der Ballermann-Sommelier des Abends!",
+  "Mehr Gefühl für Musik geht nicht!",
+  "Zeit für die Krone der Musik-Königin bzw. des Musik-Königs!",
+  "Diese Person sollte beruflich Playlists kuratieren!",
+  "Ein Ohr wie ein Luchs - Respekt!",
+  "Musikwissen auf Champions-League-Niveau!",
+  "So klingt ein wahrer Hit-Experte!"
+];
+function randomWinnerPhrase() {
+  return winnerPhrases[Math.floor(Math.random() * winnerPhrases.length)];
+}
+
+document.getElementById('startBtn').onclick = () => {
+  const names = [...playerInputs.querySelectorAll('input')].map(i => i.value.trim()).filter(Boolean);
+  if (names.length < 1) { alert('Bitte mindestens einen Spielernamen eingeben.'); return; }
+  
+  if (SONGS.length < names.length + 5) { alert('Es sind zu wenige Lieder in der Playlist!'); return; }
+
+  deck = shuffle([...SONGS]);
+  
+  // Jeder Spieler bekommt seinen eigenen Zeitstrahl mit einer Startkarte
+  players = names.map(n => ({
+    name: n, 
+    score: 1, 
+    timeline: [deck.pop()] 
+  }));
+  
+  winTarget = Math.min(parseInt(document.getElementById('winTarget').value) || 10, SONGS.length);
+  currentTurn = 0;
+
+  document.getElementById('setup').classList.add('hidden-section');
+  document.getElementById('game').classList.remove('hidden-section');
+
+  if (document.getElementById('multiplayerToggle').checked) {
+    mode = 'host'; isMultiplayer = true;
+    roomCode = String(Math.floor(1000 + Math.random() * 9000));
+    db = initFirebaseIfNeeded();
+    subscribeHostToPlacement();
+    subscribeHostToActions();
+    document.getElementById('roleBanner').textContent = `Haupt-Handy · Code für das 2. Handy: ${roomCode}`;
+  }
+  
+  renderScoreboard();
+  renderTimeline(); 
+  updateDeckCount();
+  pushState();
+};
+
+
+
+// --- Spotify IFrame Player ---
+let spotifyIFrameAPIReady = null;
+let currentController = null;
+let pendingTrackIdForApi = null;
+
+window.onSpotifyIframeApiReady = (IFrameAPI) => {
+  spotifyIFrameAPIReady = IFrameAPI;
+  if (pendingTrackIdForApi) {
+    createSpotifyController(pendingTrackIdForApi);
+    pendingTrackIdForApi = null;
+  }
+};
+
+function createSpotifyController(trackId) {
+  const target = document.getElementById('spotifyEmbedTarget');
+  if (!target) return;
+  if (!spotifyIFrameAPIReady) { pendingTrackIdForApi = trackId; return; }
+  spotifyIFrameAPIReady.createController(target, { uri: 'spotify:track:' + trackId }, (controller) => {
+    currentController = controller;
+    controller.addListener('playback_update', (e) => {
+      const overlay = document.getElementById('overlay');
+      if (overlay) overlay.textContent = e.data.isPaused ? '▶' : '⏸';
+    });
+  });
+}
+
+function destroyCurrentController() {
+  if (currentController) { try { currentController.destroy(); } catch(e) {} currentController = null; }
+}
+
+// --- Game Logic ---
+function updateDeckCount() { document.getElementById('deckCount').textContent = `Noch ${deck.length} Songs im Stapel`; }
+
+function renderScoreboard() {
+  const sb = document.getElementById('scoreboard');
+  sb.innerHTML = '';
+  players.forEach((p, idx) => {
+    const b = document.createElement('div');
+    b.className = 'playerBadge' + (idx===currentTurn ? ' active' : '');
+    b.innerHTML = `${p.name} <span class="count">${p.score}/${winTarget}</span>`;
+    sb.appendChild(b);
+  });
+}
+
+function drawSong() {
+  if (deck.length === 0) { alert('Keine Songs mehr im Stapel!'); return; }
+  pendingSong = deck.pop(); pendingIndex = null; pendingCardActive = true; pendingMarker++; updateDeckCount();
+  clearBonusGuessInputs();
+  document.getElementById('npLabel').textContent = `${players[currentTurn].name} ist dran - Player laden...`;
+  document.getElementById('resultBanner').className = '';
+  document.getElementById('drawBtn').disabled = true;
+  document.getElementById('swapBtn').disabled = false;
+  document.getElementById('revealBtn').disabled = false;
+  document.getElementById('nextTurnBtn').disabled = true;
+
+  destroyCurrentController();
+  const embedArea = document.getElementById('embedArea');
+  
+  embedArea.innerHTML = `
+    <div class="embedWrap">
+      <div class="embedOverlay" id="overlay">▶</div>
+      <div id="spotifyEmbedTarget" style="border-radius:12px; overflow:hidden;"></div>
+    </div>
+  `;
+  createSpotifyController(pendingSong.id);
+  
+  document.getElementById('overlay').onclick = () => {
+    if (currentController) currentController.togglePlay();
+    else document.getElementById('overlay').textContent = '…';
+  };
+
+  addPendingCardToTimeline();
+  pushState();
+}
+
+document.getElementById('drawBtn').onclick = () => { drawSong(); };
+
+document.getElementById('swapBtn').onclick = () => {
+  if (!pendingCardActive) return;
+  if (deck.length === 0) { alert('Keine weiteren Songs mehr im Stapel!'); return; }
+  // Aktuellen Song einfach verwerfen (nicht zurueck in den Stapel) und direkten neuen ziehen, gleicher Zug
+  drawSong();
+};
+
+function renderTimeline() {
+  document.getElementById('timelineOwner').textContent = `Zeitstrahl von ${players[currentTurn].name}`;
+  const tl = document.getElementById('timeline');
+  tl.innerHTML = '';
+  
+  const currentPlayerCards = players[currentTurn].timeline;
+  const sorted = [...currentPlayerCards].sort((a,b) => a.year - b.year);
+  
+  // 1. Wenn noch kein Slot gewählt wurde, liegt die gezogene Karte ganz links
+  if (pendingCardActive && pendingIndex === null) {
+    tl.appendChild(makePendingCardEl());
+  }
+
+  // 2. Erster Slot (Index 0)
+  if (pendingCardActive && pendingIndex === 0) {
+    tl.appendChild(makePendingCardEl());
+  }
+  tl.appendChild(makeSlot(0));
+
+  // 3. Karten und folgende Slots durchgehen
+  sorted.forEach((card, i) => {
+    tl.appendChild(makeCardEl(card));
+    
+    let slotIdx = i + 1;
+    if (pendingCardActive && pendingIndex === slotIdx) {
+      tl.appendChild(makePendingCardEl());
+    }
+    tl.appendChild(makeSlot(slotIdx));
+  });
+}
+
+function makeSlot(index) {
+  const slot = document.createElement('div');
+  slot.className = 'slot'; 
+  slot.dataset.index = index;
+  
+  const line = document.createElement('div'); 
+  line.className = 'dropline';
+  line.innerHTML = `<span style="font-size:0.7em; font-weight:bold;">+ Platzieren</span>`;
+  slot.appendChild(line);
+  
+  // Statt Drag & Drop einfach ein Klick, um die Karte hierhin zu setzen!
+  slot.onclick = () => {
+    if (!pendingCardActive) return;
+    if (isMultiplayer && mode === 'companion' && !isMyTurn()) return; // nicht dein Zug
+    const idx = parseInt(slot.dataset.index);
+    if (isMultiplayer && mode === 'companion') {
+      db.ref('rooms/' + roomCode + '/placementRequest').set(idx);
+      document.getElementById('npLabel').textContent = `Karte ausgewählt - sende an Haupt-Handy...`;
+    } else {
+      pendingIndex = idx;
+      document.getElementById('npLabel').textContent = `Karte platziert! Klicke "Auflösen".`;
+      renderTimeline();
+      if (isMultiplayer && mode === 'host') pushState();
+    }
+  };
+  
+  return slot;
+}
+
+function makeCardEl(card) {
+  const el = document.createElement('div');
+  el.className = 'card';
+  el.innerHTML = `<div class="year">${card.year}</div><div class="title">${card.title}</div><div class="artist">${card.artist}</div>`;
+  return el;
+}
+
+function makePendingCardEl() {
+  const pendingEl = document.createElement('div');
+  pendingEl.className = 'card hidden pending';
+  pendingEl.id = 'pendingCard';
+  return pendingEl;
+}
+
+function addPendingCardToTimeline() {
+  pendingIndex = null; // Zurücksetzen beim neuen Song ziehen
+  renderTimeline();
+}
+
+function doReveal(remoteGuesses) {
+  if (pendingIndex === null) { if (mode !== 'companion') alert('Wähle erst einen Platz in der Timeline aus!'); return; }
+  
+  const currentPlayerCards = players[currentTurn].timeline;
+  const sortedYears = [...currentPlayerCards].sort((a,b) => a.year - b.year).map(c => c.year);
+  
+  const lower = pendingIndex > 0 ? sortedYears[pendingIndex-1] : -Infinity;
+  const upper = pendingIndex < sortedYears.length ? sortedYears[pendingIndex] : Infinity;
+  const correct = pendingSong.year >= lower && pendingSong.year <= upper;
+
+  // Bonus: Interpret & Songtitel - entweder lokal eingegeben oder vom 2. Handy mitgeschickt
+  const artistGuess = remoteGuesses ? (remoteGuesses.artist || '') : document.getElementById('artistGuessInput').value;
+  const titleGuess = remoteGuesses ? (remoteGuesses.title || '') : document.getElementById('titleGuessInput').value;
+  const artistCorrect = guessMatches(artistGuess, pendingSong.artist);
+  const titleCorrect = guessMatches(titleGuess, pendingSong.title);
+  const bonusPoints = (artistCorrect ? 1 : 0) + (titleCorrect ? 1 : 0);
+
+  if (document.getElementById('overlay')) document.getElementById('overlay').style.display = 'none';
+  if (currentController) { try { currentController.pause(); } catch(e) {} }
+
+  const banner = document.getElementById('resultBanner');
+  let bonusMsg = '';
+  if (artistCorrect && titleCorrect) bonusMsg = ' 🎯 Bonus: Interpret & Songtitel beide richtig! (+2)';
+  else if (artistCorrect) bonusMsg = ' 🎯 Bonus: Interpret richtig! (+1)';
+  else if (titleCorrect) bonusMsg = ' 🎯 Bonus: Songtitel richtig! (+1)';
+
+  if (correct) {
+    banner.className = 'show ok';
+    banner.textContent = `Richtig! ${pendingSong.title} ist von ${pendingSong.year}. Die Karte gehört dir!${bonusMsg}`;
+    players[currentTurn].score++;
+    players[currentTurn].timeline.push(pendingSong); 
+  } else {
+    banner.className = 'show bad';
+    banner.textContent = `Falsch! ${pendingSong.title} ist von ${pendingSong.year}. Die Karte wird abgeworfen.${bonusMsg}`;
+  }
+  if (bonusPoints > 0) players[currentTurn].score += bonusPoints;
+  
+  // ---> HIER IST DER WICHTIGE FIX <---
+  // Wir leeren den Zwischenspeicher, BEVOR wir die Timeline neu zeichnen
+  pendingSong = null;
+  pendingIndex = null;
+  pendingCardActive = false;
+  clearBonusGuessInputs();
+  
+  renderScoreboard(); 
+  renderTimeline(); 
+  
+  document.getElementById('revealBtn').disabled = true;
+  document.getElementById('swapBtn').disabled = true;
+  document.getElementById('nextTurnBtn').disabled = false;
+
+  if (players[currentTurn].score >= winTarget) {
+    document.getElementById('game').classList.add('hidden-section');
+    document.getElementById('winnerBox').classList.remove('hidden-section');
+    document.getElementById('winnerText').textContent = `${players[currentTurn].name} gewinnt mit ${players[currentTurn].score} Karten! ${randomWinnerPhrase()} Prost! 🍻`;
+  }
+  pushState();
+}
+
+document.getElementById('revealBtn').onclick = () => {
+  if (isMultiplayer && mode === 'companion') {
+    if (!isMyTurn()) return;
+    if (pendingIndex === null) { alert('Wähle erst einen Platz in der Timeline aus!'); return; }
+    const artistGuess = document.getElementById('artistGuessInput').value;
+    const titleGuess = document.getElementById('titleGuessInput').value;
+    document.getElementById('npLabel').textContent = 'Auflösung angefragt...';
+    sendCompanionAction('reveal', { artistGuess, titleGuess });
+    clearBonusGuessInputs();
+  } else {
+    doReveal();
+  }
+};
+
+function doNextTurn() {
+  currentTurn = (currentTurn + 1) % players.length; 
+  pendingSong = null; pendingIndex = null; pendingCardActive = false;
+  destroyCurrentController();
+  
+  document.getElementById('embedArea').innerHTML = '';
+  document.getElementById('npLabel').textContent = `${players[currentTurn].name} ist dran.`;
+  document.getElementById('resultBanner').className = '';
+  document.getElementById('drawBtn').disabled = false;
+  document.getElementById('swapBtn').disabled = true;
+  document.getElementById('nextTurnBtn').disabled = true;
+  
+  renderScoreboard();
+  renderTimeline(); // Wechselt die Ansicht zum Zeitstrahl des nächsten Spielers
+  pushState();
+}
+
+document.getElementById('nextTurnBtn').onclick = () => {
+  if (isMultiplayer && mode === 'companion') {
+    if (!isMyTurn()) return;
+    document.getElementById('npLabel').textContent = 'Nächster Spieler angefragt...';
+    sendCompanionAction('nextTurn');
+  } else {
+    doNextTurn();
+  }
+};
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// --- PWA: Service Worker registrieren (macht die Seite installierbar) ---
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // Falls sw.js fehlt (z.B. lokal ohne Upload), einfach ignorieren - Spiel funktioniert trotzdem
+    });
+  });
+}
+
+
+
+
+</script>
+
+</body>
+
+</html>

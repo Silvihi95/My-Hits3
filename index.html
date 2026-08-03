@@ -274,13 +274,9 @@ let players=[], winTarget=10, deck=[], currentTurn=0, pendingSong=null, pendingI
 // ── ABBRECHEN ──────────────────────────────────────────────
 function cancelPlaylist() {
   document.getElementById('playlistInput').value = '';
-  if (accessToken) {
-    document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge einen anderen Playlist-Link ein.';
-    document.getElementById('playlistStatus').style.color = '#2ec4b6';
-  } else {
-    document.getElementById('playlistArea').classList.add('hidden-section');
-    document.getElementById('loginArea').classList.remove('hidden-section');
-  }
+  document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge einen anderen Playlist-Link ein.';
+  document.getElementById('playlistStatus').style.color = '#2ec4b6';
+}
 }
 
 // ── UTILS ──────────────────────────────────────────────────

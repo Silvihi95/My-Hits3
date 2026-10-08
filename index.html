@@ -169,7 +169,10 @@
       <input type="checkbox" id="multiplayerToggle" style="width:auto;margin:0;"> Mit zweitem Handy synchronisieren
     </label>
   </div>
-  <div style="text-align:center;"><button id="startBtn">Spiel starten</button></div>
+ <div style="text-align:center; display: flex; gap: 8px; justify-content: center;">
+  <button class="danger" onclick="goBackToPlaylist()" style="flex: 1;">← Zurück</button>
+  <button id="startBtn" style="flex: 1;">Spiel starten</button>
+</div>
 </div>
 
 <!-- GAME -->
@@ -588,7 +591,7 @@ async function loadPlaylist() {
     d.items.forEach(entry=>{ const t=entry&&entry.item; if(t&&t.id){ const y=t.album&&t.album.release_date?parseInt(t.album.release_date.split('-')[0]):2024; SONGS.push({title:t.name||"Unbekannt",artist:t.artists?t.artists.map(a=>a.name).join(', '):"Unbekannt",year:y,id:t.id}); } });
     if(SONGS.length<5) throw new Error("Zu wenige Lieder.");
     s.style.color="#2ec4b6"; s.innerText=SONGS.length+" Lieder geladen!";
-    savePlaylistToHistory(document.getElementById('playlistInput').value);
+   
     setTimeout(()=>{ document.getElementById('apiSetup').classList.add('hidden-section'); document.getElementById('setup').classList.remove('hidden-section'); },1500);
   } catch(e){ s.style.color="#ff5757"; s.innerText="Fehler: "+e.message; }
 }
@@ -611,6 +614,15 @@ const playerInputs=document.getElementById('playerInputs');
 function addPlayerRow(name){ const row=document.createElement('div'); row.className='playerRow'; const inp=document.createElement('input'); inp.type='text'; inp.placeholder='Spielername'; inp.value=name||''; const rm=document.createElement('button'); rm.textContent='X'; rm.className='danger'; rm.onclick=()=>row.remove(); row.appendChild(inp); row.appendChild(rm); playerInputs.appendChild(row); }
 addPlayerRow('Spieler 1'); addPlayerRow('Spieler 2');
 document.getElementById('addPlayerBtn').onclick=()=>addPlayerRow('');
+  function goBackToPlaylist() {
+  players=[]; deck=[]; SONGS=[];
+  document.getElementById('setup').classList.add('hidden-section');
+  document.getElementById('apiSetup').classList.remove('hidden-section');
+  document.getElementById('playlistInput').value = '';
+  document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge den Playlist-Link ein.';
+  document.getElementById('playlistStatus').style.color = '#2ec4b6';
+  renderPlaylistHistory();
+}
 
 document.getElementById('startBtn').onclick=()=>{
   const names=[...playerInputs.querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean);

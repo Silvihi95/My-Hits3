@@ -313,9 +313,11 @@ async function refreshSpotifyToken() {
 
 function savePlaylistToHistory(url) {
   let history = JSON.parse(window.localStorage.getItem('playlist_history') || '[]');
-  history = history.filter(p => p !== url);
-  history.unshift(url);
-  history = history.slice(0, 5);
+  history = history.filter(p => p.url !== url);
+  const name = prompt('Wie heißt diese Playlist?', 'Meine Playlist');
+  if(!name) return;
+  history.unshift({url, name: name || 'Playlist'});
+  history = history.slice(0, 10);
   window.localStorage.setItem('playlist_history', JSON.stringify(history));
   renderPlaylistHistory();
 }
@@ -327,17 +329,36 @@ function renderPlaylistHistory() {
   container.innerHTML = '';
   if(history.length === 0) return;
   const label = document.createElement('label');
-  label.textContent = 'Zuletzt verwendet:';
+  label.textContent = 'Gespeicherte Playlisten:';
   container.appendChild(label);
-  history.forEach(url => {
+  history.forEach((item, idx) => {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'display: flex; gap: 6px; margin-bottom: 6px; align-items: center;';
+    
     const btn = document.createElement('button');
     btn.className = 'secondary';
-    btn.style.cssText = 'display: block; width: 100%; margin-bottom: 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
-    btn.textContent = url;
+    btn.style.cssText = 'flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+    btn.textContent = item.name || 'Unbenannt';
+    btn.title = item.url;
     btn.onclick = () => {
-      document.getElementById('playlistInput').value = url;
+      document.getElementById('playlistInput').value = item.url;
     };
-    container.appendChild(btn);
+    
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'danger';
+    deleteBtn.textContent = '✕';
+    deleteBtn.style.cssText = 'padding: 10px 12px; flex-shrink: 0;';
+    deleteBtn.onclick = (e) => {
+      e.stopPropagation();
+      let h = JSON.parse(window.localStorage.getItem('playlist_history') || '[]');
+      h = h.filter((_, i) => i !== idx);
+      window.localStorage.setItem('playlist_history', JSON.stringify(h));
+      renderPlaylistHistory();
+    };
+    
+    wrapper.appendChild(btn);
+    wrapper.appendChild(deleteBtn);
+    container.appendChild(wrapper);
   });
 }
 

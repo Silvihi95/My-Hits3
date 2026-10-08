@@ -88,8 +88,10 @@
   .stealSlot .dropline:hover,.stealSlot.selected .dropline { background:rgba(255,87,87,0.25); border-color:#ff5757; border-width:3px; box-shadow:0 0 10px rgba(255,87,87,0.4); }
   #stealControls { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
   #stealControls button { flex:1 1 120px; }
-  /* ======================== */
-
+  
+  #playlistHistoryContainer { margin: 12px 0; }
+  #playlistHistoryContainer button { font-size: 0.85em; padding: 10px 12px; }
+  
   .hidden-section { display:none !important; }
   @media (max-width: 400px) {
     body { padding: 12px; } h1 { font-size: 1.3em; } .panel { padding: 12px; } #controls button { flex-basis: 100%; }
@@ -140,6 +142,7 @@
       <p style="color:#2ec4b6;font-weight:bold;" id="playlistStatus">✓ Verbunden!</p>
       <label>Spotify Playlist Link:</label>
       <input type="text" id="playlistInput" placeholder="https://open.spotify.com/playlist/...">
+      <div id="playlistHistoryContainer"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button onclick="loadPlaylist()" style="flex:1 1 160px;">Lieder importieren</button>
         <button class="danger" onclick="cancelPlaylist()" style="flex:1 1 120px;">✕ Abbrechen</button>
@@ -270,6 +273,74 @@ let SONGS=[], accessToken=null;
 const redirectUri = window.location.href.split('?')[0].split('#')[0];
 let players=[], winTarget=10, deck=[], currentTurn=0, pendingSong=null, pendingIndex=null;
 
+// ── PERSISTENT STORAGE: Spotify Token & Playlist History ──────────
+function saveSpotifyToken(token, refreshToken) {
+  window.localStorage.setItem('spotify_access_token', token);
+  window.localStorage.setItem('spotify_token_time', Date.now());
+  if(refreshToken) window.localStorage.setItem('spotify_refresh_token', refreshToken);
+}
+
+function loadSpotifyToken() {
+  const token = window.localStorage.getItem('spotify_access_token');
+  const tokenTime = parseInt(window.localStorage.getItem('spotify_token_time') || '0');
+  const tokenAge = (Date.now() - tokenTime) / 1000 / 3600;
+  if(token && tokenAge < 1) return token;
+  return null;
+}
+
+async function refreshSpotifyToken() {
+  const refreshToken = window.localStorage.getItem('spotify_refresh_token');
+  if(!refreshToken) return false;
+  try {
+    const body = new URLSearchParams({
+      client_id: getActiveClientId(),
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken
+    });
+    const r = await fetch('https://accounts.spotify.com/api/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+    const d = await r.json();
+    if(d.access_token) {
+      saveSpotifyToken(d.access_token, d.refresh_token || refreshToken);
+      return true;
+    }
+  } catch(e) {}
+  return false;
+}
+
+function savePlaylistToHistory(url) {
+  let history = JSON.parse(window.localStorage.getItem('playlist_history') || '[]');
+  history = history.filter(p => p !== url);
+  history.unshift(url);
+  history = history.slice(0, 5);
+  window.localStorage.setItem('playlist_history', JSON.stringify(history));
+  renderPlaylistHistory();
+}
+
+function renderPlaylistHistory() {
+  const history = JSON.parse(window.localStorage.getItem('playlist_history') || '[]');
+  const container = document.getElementById('playlistHistoryContainer');
+  if(!container) return;
+  container.innerHTML = '';
+  if(history.length === 0) return;
+  const label = document.createElement('label');
+  label.textContent = 'Zuletzt verwendet:';
+  container.appendChild(label);
+  history.forEach(url => {
+    const btn = document.createElement('button');
+    btn.className = 'secondary';
+    btn.style.cssText = 'display: block; width: 100%; margin-bottom: 6px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+    btn.textContent = url;
+    btn.onclick = () => {
+      document.getElementById('playlistInput').value = url;
+    };
+    container.appendChild(btn);
+  });
+}
+
 // ── PLAYLIST ABBRECHEN ─────────────────────────────────────
 function cancelPlaylist() {
   document.getElementById('playlistInput').value = '';
@@ -349,7 +420,6 @@ function subscribeHostToPlacement() {
   });
 }
 
-// ✅ ALLE Actions die vom Companion kommen können
 function subscribeHostToActions() {
   db.ref('rooms/'+roomCode+'/actionRequest').on('value', snap=>{
     const val=snap.val();
@@ -466,7 +536,13 @@ async function exchangeToken(code) {
   try {
     const r=await fetch('https://accounts.spotify.com/api/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
     const d=await r.json();
-    if(d.access_token){ accessToken=d.access_token; document.getElementById('playlistStatus').innerText='✓ Verbunden! Füge den Playlist-Link ein.'; document.getElementById('playlistStatus').style.color='#2ec4b6'; }
+    if(d.access_token){ 
+      accessToken=d.access_token;
+      saveSpotifyToken(d.access_token, d.refresh_token);
+      document.getElementById('playlistStatus').innerText='✓ Verbunden! Füge den Playlist-Link ein.';
+      document.getElementById('playlistStatus').style.color='#2ec4b6';
+      renderPlaylistHistory();
+    }
     else throw new Error("Token Error");
   } catch(e){ document.getElementById('playlistStatus').innerText='Fehler: '+e.message; document.getElementById('playlistStatus').style.color='#ff5757'; }
 }
@@ -474,6 +550,14 @@ async function exchangeToken(code) {
 async function loadPlaylist() {
   const m=document.getElementById('playlistInput').value.match(/playlist\/([a-zA-Z0-9]+)/);
   if(!m){alert("Kein gültiger Link!");return;}
+  
+  const tokenTime = parseInt(window.localStorage.getItem('spotify_token_time') || '0');
+  const tokenAge = (Date.now() - tokenTime) / 1000 / 60;
+  if(tokenAge > 55) {
+    const refreshed = await refreshSpotifyToken();
+    if(!refreshed) { alert("Token abgelaufen. Bitte neu einloggen."); return; }
+  }
+  
   const s=document.getElementById('playlistStatus'); s.innerText="Lade..."; s.style.color="white";
   try {
     const r=await fetch('https://api.spotify.com/v1/playlists/'+m[1]+'/items?limit=100',{headers:{'Authorization':'Bearer '+accessToken}});
@@ -483,6 +567,7 @@ async function loadPlaylist() {
     d.items.forEach(entry=>{ const t=entry&&entry.item; if(t&&t.id){ const y=t.album&&t.album.release_date?parseInt(t.album.release_date.split('-')[0]):2024; SONGS.push({title:t.name||"Unbekannt",artist:t.artists?t.artists.map(a=>a.name).join(', '):"Unbekannt",year:y,id:t.id}); } });
     if(SONGS.length<5) throw new Error("Zu wenige Lieder.");
     s.style.color="#2ec4b6"; s.innerText=SONGS.length+" Lieder geladen!";
+    savePlaylistToHistory(document.getElementById('playlistInput').value);
     setTimeout(()=>{ document.getElementById('apiSetup').classList.add('hidden-section'); document.getElementById('setup').classList.remove('hidden-section'); },1500);
   } catch(e){ s.style.color="#ff5757"; s.innerText="Fehler: "+e.message; }
 }
@@ -490,6 +575,14 @@ async function loadPlaylist() {
 document.addEventListener('DOMContentLoaded',()=>{
   const h=document.getElementById('redirectUriHint'); if(h)h.textContent=redirectUri;
   const s=window.localStorage.getItem('custom_client_id'),i=document.getElementById('customClientIdInput'); if(s&&i)i.value=s;
+  
+  const savedToken = loadSpotifyToken();
+  if(savedToken) {
+    accessToken = savedToken;
+    document.getElementById('loginArea').classList.add('hidden-section');
+    document.getElementById('playlistArea').classList.remove('hidden-section');
+    renderPlaylistHistory();
+  }
 });
 
 // ── PLAYER SETUP ───────────────────────────────────────────
@@ -713,7 +806,6 @@ function resolveWithSteal(){
   pushState();
 }
 
-// ✅ Alle Buttons leiten beim Companion über Firebase weiter
 document.getElementById('stealReadyBtn').onclick=()=>{
   if(isMultiplayer&&mode==='companion'){
     document.getElementById('npLabel').textContent='Auflösung angefragt...';

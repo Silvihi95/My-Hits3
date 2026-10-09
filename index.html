@@ -106,7 +106,7 @@
 <!-- ZWEITES HANDY -->
 <div id="joinPanel" class="panel" style="max-width:900px;margin:0 auto 16px;">
   <h3>Schon ein Spiel auf einem anderen Handy gestartet?</h3>
-  <p style="font-size:0.85em;opacity:0.8;">Dann gib hier den 4-stelligen Code ein.</p>
+  <p style="font-size:0.85em;opacity:0.8;">Dann gib hier den 4-stelligen Code ein oder scanne den QR-Code.</p>
   <div style="display:flex;gap:8px;">
     <input type="text" id="joinCodeInput" placeholder="z.B. 4821" maxlength="4" style="margin-bottom:0;">
     <button class="secondary" onclick="joinRoom()">Verbinden</button>
@@ -142,6 +142,10 @@
       <p style="color:#2ec4b6;font-weight:bold;" id="playlistStatus">✓ Verbunden!</p>
       <label>Spotify Playlist Link:</label>
       <input type="text" id="playlistInput" placeholder="https://open.spotify.com/playlist/...">
+      <div id="playlistQRContainer" style="text-align:center;margin:12px 0;display:none;">
+        <p style="font-size:0.85em;opacity:0.8;">📱 QR-Code zum Teilen:</p>
+        <div id="playlistQRCode" style="display:inline-block;padding:10px;background:white;border-radius:8px;"></div>
+      </div>
       <div id="playlistHistoryContainer"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button onclick="loadPlaylist()" style="flex:1 1 160px;">Lieder importieren</button>
@@ -178,6 +182,11 @@
 <!-- GAME -->
 <div id="game" class="hidden-section">
   <div id="roleBanner" style="text-align:center;opacity:0.75;font-size:0.9em;margin-bottom:8px;"></div>
+  <div id="roomQRContainer" class="panel hidden-section" style="text-align:center;max-width:400px;margin:0 auto 16px;">
+    <p style="margin:0 0 10px;font-size:0.9em;">📱 Scanne zum Verbinden:</p>
+    <div id="roomQRCode" style="display:inline-block;padding:10px;background:white;border-radius:8px;"></div>
+    <p style="font-size:0.8em;opacity:0.7;margin-top:8px;">oder gib Code ein: <strong id="roomCodeDisplay"></strong></p>
+  </div>
   <div id="playerPickPanel" class="panel hidden-section" style="text-align:center;">
     <h3>Wer bist du?</h3>
     <div id="playerPickButtons" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;"></div>
@@ -252,6 +261,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.2/firebase-database-compat.js"></script>
 <script src="https://open.spotify.com/embed/iframe-api/v1" async></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 const firebaseConfig = {
   apiKey: "AIzaSyCFbhWWxdt4l_Wi3nT7zXmcow6hQR-c81U",
@@ -312,6 +322,34 @@ async function refreshSpotifyToken() {
     }
   } catch(e) {}
   return false;
+}
+
+function generatePlaylistQR(url) {
+  const container = document.getElementById('playlistQRCode');
+  container.innerHTML = '';
+  new QRCode(container, {
+    text: url,
+    width: 200,
+    height: 200,
+    colorDark: '#000000',
+    colorLight: '#ffffff'
+  });
+  document.getElementById('playlistQRContainer').style.display = 'block';
+}
+
+function generateRoomQR(code) {
+  const container = document.getElementById('roomQRCode');
+  container.innerHTML = '';
+  const joinUrl = window.location.href.split('?')[0].split('#')[0] + '?room=' + code;
+  new QRCode(container, {
+    text: joinUrl,
+    width: 200,
+    height: 200,
+    colorDark: '#000000',
+    colorLight: '#ffffff'
+  });
+  document.getElementById('roomCodeDisplay').textContent = code;
+  document.getElementById('roomQRContainer').classList.remove('hidden-section');
 }
 
 function savePlaylistToHistory(url) {
@@ -562,8 +600,14 @@ function generateRandomString(l) { let t=''; const p='ABCDEFGHIJKLMNOPQRSTUVWXYZ
 async function generateCodeChallenge(v) { const d=await window.crypto.subtle.digest('SHA-256',new TextEncoder().encode(v)); return btoa(String.fromCharCode(...new Uint8Array(d))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,''); }
 async function loginSpotify() { const cv=generateRandomString(64); window.localStorage.setItem('code_verifier',cv); const cc=await generateCodeChallenge(cv); const p=new URLSearchParams({client_id:getActiveClientId(),response_type:'code',redirect_uri:redirectUri,scope:'user-read-private playlist-read-private playlist-read-collaborative',code_challenge_method:'S256',show_dialog:'true',code_challenge:cc}); window.location.href='https://accounts.spotify.com/authorize?'+p.toString(); }
 
-const urlParams=new URLSearchParams(window.location.search), code=urlParams.get('code');
+const urlParams=new URLSearchParams(window.location.search), code=urlParams.get('code'), roomParam=urlParams.get('room');
 if(code){ document.getElementById('loginArea').classList.add('hidden-section'); document.getElementById('playlistArea').classList.remove('hidden-section'); document.getElementById('playlistStatus').innerText="Authentifiziere..."; exchangeToken(code); window.history.replaceState({},document.title,redirectUri); }
+if(roomParam && /^[0-9]{4}$/.test(roomParam)){ 
+  setTimeout(()=>{ 
+    document.getElementById('joinCodeInput').value=roomParam; 
+    joinRoom(); 
+  }, 500); 
+}
 
 async function exchangeToken(code) {
   const body=new URLSearchParams({client_id:getActiveClientId(),grant_type:'authorization_code',code,redirect_uri:redirectUri,code_verifier:window.localStorage.getItem('code_verifier')});
@@ -601,6 +645,9 @@ async function loadPlaylist() {
     d.items.forEach(entry=>{ const t=entry&&entry.item; if(t&&t.id){ const y=t.album&&t.album.release_date?parseInt(t.album.release_date.split('-')[0]):2024; SONGS.push({title:t.name||"Unbekannt",artist:t.artists?t.artists.map(a=>a.name).join(', '):"Unbekannt",year:y,id:t.id}); } });
     if(SONGS.length<5) throw new Error("Zu wenige Lieder.");
     s.style.color="#2ec4b6"; s.innerText=SONGS.length+" Lieder geladen!";
+    const playlistUrl = document.getElementById('playlistInput').value;
+    generatePlaylistQR(playlistUrl);
+    savePlaylistToHistory(playlistUrl);
     setTimeout(()=>{ document.getElementById('apiSetup').classList.add('hidden-section'); document.getElementById('setup').classList.remove('hidden-section'); },1500);
   } catch(e){ s.style.color="#ff5757"; s.innerText="Fehler: "+e.message; }
 }
@@ -640,6 +687,7 @@ document.getElementById('startBtn').onclick=()=>{
     db=initFirebaseIfNeeded();
     subscribeHostToPlacement(); subscribeHostToActions();
     document.getElementById('roleBanner').textContent='Haupt-Handy · Code: '+roomCode;
+    generateRoomQR(roomCode);
   }
   renderScoreboard(); renderTimeline(); updateDeckCount(); pushState();
 };

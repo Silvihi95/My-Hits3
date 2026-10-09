@@ -821,10 +821,12 @@ function updateStealReadyBtn(){
     btn.disabled=true;
     return;
   }
-  const isHostStealing=(stealingPlayerIndex===myPlayerIndex&&mode==='companion')||mode==='host';
-  if(isMultiplayer&&mode==='companion'){
-    if(stealingPlayerIndex===myPlayerIndex) btn.disabled=false;
-    else btn.disabled=true;
+  if(isMultiplayer){
+    if(mode==='host'){
+      btn.disabled=false;
+    } else if(mode==='companion'){
+      btn.disabled=(stealingPlayerIndex!==myPlayerIndex);
+    }
   } else {
     btn.disabled=false;
   }
@@ -927,9 +929,11 @@ function resolveWithSteal(){
 }
 
 document.getElementById('stealReadyBtn').onclick=()=>{
-  if(!isMultiplayer||mode==='host'){
+  if(!isMultiplayer){
     resolveWithSteal();
-  } else if(mode==='companion'){
+  } else if(mode==='host'){
+    resolveWithSteal();
+  } else if(mode==='companion'&&stealingPlayerIndex===myPlayerIndex){
     document.getElementById('stealReadyBtn').disabled=true;
     document.getElementById('stealReadyBtn').textContent='✅ Wird aufgelöst...';
     sendCompanionAction('resolveSteal');

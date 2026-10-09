@@ -326,15 +326,19 @@ async function refreshSpotifyToken() {
 
 function generatePlaylistQR(url) {
   const container = document.getElementById('playlistQRCode');
+  const qrContainer = document.getElementById('playlistQRContainer');
+  if(!container || !qrContainer) return;
   container.innerHTML = '';
-  new QRCode(container, {
-    text: url,
-    width: 200,
-    height: 200,
-    colorDark: '#000000',
-    colorLight: '#ffffff'
-  });
-  document.getElementById('playlistQRContainer').style.display = 'block';
+  qrContainer.style.display = 'block';
+  setTimeout(() => {
+    new QRCode(container, {
+      text: url,
+      width: 200,
+      height: 200,
+      colorDark: '#000000',
+      colorLight: '#ffffff'
+    });
+  }, 100);
 }
 
 function generateRoomQR(code) {
@@ -383,6 +387,7 @@ function renderPlaylistHistory() {
     btn.title = item.url;
     btn.onclick = () => {
       document.getElementById('playlistInput').value = item.url;
+      loadPlaylist();
     };
     
     const deleteBtn = document.createElement('button');

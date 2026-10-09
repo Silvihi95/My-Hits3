@@ -149,6 +149,7 @@
       <div id="playlistHistoryContainer"></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button onclick="loadPlaylist()" style="flex:1 1 160px;">Lieder importieren</button>
+        <button onclick="saveCurrentPlaylist()" class="secondary" style="flex:1 1 140px;">💾 Speichern</button>
         <button class="danger" onclick="cancelPlaylist()" style="flex:1 1 120px;">✕ Abbrechen</button>
       </div>
     </div>
@@ -200,7 +201,7 @@
     <div id="embedArea"></div>
     <div style="opacity:0.6;font-size:0.85em;margin-top:6px;">Klicke auf das gelbe Feld zum Abspielen, dann auf einen Slot in der Timeline.</div>
     <div id="bonusGuessArea" style="margin-top:10px;text-align:left;">
-      <label style="margin-bottom:4px;">🎯 Bonus: Interpret & Songtitel raten</label>
+      <label style="margin-bottom:4px;">🎯 Bonus: Interpret & Songtitel raten (nur Token, keine Punkte)</label>
       <input type="text" id="artistGuessInput" placeholder="Interpret">
       <input type="text" id="titleGuessInput" placeholder="Songtitel" style="margin-bottom:0;">
     </div>
@@ -286,7 +287,6 @@ let SONGS=[], accessToken=null;
 const redirectUri = window.location.href.split('?')[0].split('#')[0];
 let players=[], winTarget=10, deck=[], currentTurn=0, pendingSong=null, pendingIndex=null;
 
-// ── PERSISTENT STORAGE: Spotify Token & Playlist History ──────────
 function saveSpotifyToken(token, refreshToken) {
   window.localStorage.setItem('spotify_access_token', token);
   window.localStorage.setItem('spotify_token_time', Date.now());
@@ -356,7 +356,9 @@ function generateRoomQR(code) {
   document.getElementById('roomQRContainer').classList.remove('hidden-section');
 }
 
-function savePlaylistToHistory(url) {
+function saveCurrentPlaylist() {
+  const url = document.getElementById('playlistInput').value.trim();
+  if(!url) { alert('Bitte erst einen Link eingeben!'); return; }
   let history = JSON.parse(window.localStorage.getItem('playlist_history') || '[]');
   history = history.filter(p => p.url !== url);
   const name = prompt('Wie heißt diese Playlist?', 'Meine Playlist');
@@ -365,6 +367,9 @@ function savePlaylistToHistory(url) {
   history = history.slice(0, 10);
   window.localStorage.setItem('playlist_history', JSON.stringify(history));
   renderPlaylistHistory();
+  const s = document.getElementById('playlistStatus');
+  s.innerText = '✓ Playlist gespeichert!';
+  s.style.color = '#2ec4b6';
 }
 
 function renderPlaylistHistory() {
@@ -408,14 +413,12 @@ function renderPlaylistHistory() {
   });
 }
 
-// ── PLAYLIST ABBRECHEN ─────────────────────────────────────
 function cancelPlaylist() {
   document.getElementById('playlistInput').value = '';
   document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge einen anderen Playlist-Link ein.';
   document.getElementById('playlistStatus').style.color = '#2ec4b6';
 }
 
-// ── SPIEL ABBRECHEN ────────────────────────────────────────
 function abortGame() {
   if (!confirm('Spiel wirklich abbrechen und neue Playlist laden?')) return;
   players=[]; deck=[]; pendingSong=null; pendingIndex=null; pendingCardActive=false;
@@ -448,7 +451,6 @@ function goBackToPlaylist() {
   renderPlaylistHistory();
 }
 
-// ── UTILS ──────────────────────────────────────────────────
 function isMyTurn() { if(mode!=='companion')return true; if(myPlayerIndex===null)return true; return currentTurn===myPlayerIndex; }
 function normalizeGuess(s) { return(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').trim(); }
 function guessMatches(g,a) { const gn=normalizeGuess(g),an=normalizeGuess(a); if(!gn||!an)return false; return an.includes(gn)||gn.includes(an); }
@@ -457,16 +459,15 @@ function shuffle(arr) { const a=[...arr]; for(let i=a.length-1;i>0;i--){const j=
 const winnerPhrases = ["Absolute Playlist-Legende!","Diese Ohren hören Jahreszahlen wie ein Shazam auf zwei Beinen!","Da hat wohl jemand ein musikalisches Näschen!","Der Ballermann-Sommelier des Abends!","Mehr Gefühl für Musik geht nicht!","Zeit für die Krone der Musik-Königin bzw. des Musik-Königs!","Diese Person sollte beruflich Playlists kuratieren!","Ein Ohr wie ein Luchs - Respekt!","Musikwissen auf Champions-League-Niveau!","So klingt ein wahrer Hit-Experte!"];
 function randomWinnerPhrase() { return winnerPhrases[Math.floor(Math.random()*winnerPhrases.length)]; }
 function checkWinner(idx) {
-  if(players[idx]&&players[idx].score>=winTarget){
+  if(players[idx] && players[idx].timeline.length >= winTarget){
     document.getElementById('game').classList.add('hidden-section');
     document.getElementById('winnerBox').classList.remove('hidden-section');
-    document.getElementById('winnerText').textContent=players[idx].name+' gewinnt mit '+players[idx].score+' Karten! '+randomWinnerPhrase()+' Prost! 🍻';
+    document.getElementById('winnerText').textContent=players[idx].name+' gewinnt mit '+players[idx].timeline.length+' Karten! '+randomWinnerPhrase()+' Prost! 🍻';
     return true;
   }
   return false;
 }
 
-// ── FIREBASE SYNC ──────────────────────────────────────────
 function serializeState() {
   return {
     players, winTarget, currentTurn, deckCount:deck.length,
@@ -597,7 +598,6 @@ function pickMyPlayer(idx) {
   if(lastSnapshotData)renderFromSnapshot(lastSnapshotData);
 }
 
-// ── SPOTIFY AUTH ───────────────────────────────────────────
 const DEFAULT_CLIENT_ID='c16024b7e9ef498d8b1362b99a50f546';
 function getActiveClientId() { return window.localStorage.getItem('custom_client_id')||DEFAULT_CLIENT_ID; }
 function saveCustomClientId() { const v=document.getElementById('customClientIdInput').value.trim(),s=document.getElementById('customClientIdStatus'); if(!v){window.localStorage.removeItem('custom_client_id');s.textContent='Zurückgesetzt.';return;} window.localStorage.setItem('custom_client_id',v); s.textContent='✓ Gespeichert!'; s.style.color='#2ec4b6'; }
@@ -652,7 +652,6 @@ async function loadPlaylist() {
     s.style.color="#2ec4b6"; s.innerText=SONGS.length+" Lieder geladen!";
     const playlistUrl = document.getElementById('playlistInput').value;
     generatePlaylistQR(playlistUrl);
-    savePlaylistToHistory(playlistUrl);
     setTimeout(()=>{ document.getElementById('apiSetup').classList.add('hidden-section'); document.getElementById('setup').classList.remove('hidden-section'); },1500);
   } catch(e){ s.style.color="#ff5757"; s.innerText="Fehler: "+e.message; }
 }
@@ -670,7 +669,6 @@ document.addEventListener('DOMContentLoaded',()=>{
   }
 });
 
-// ── PLAYER SETUP ───────────────────────────────────────────
 const playerInputs=document.getElementById('playerInputs');
 function addPlayerRow(name){ const row=document.createElement('div'); row.className='playerRow'; const inp=document.createElement('input'); inp.type='text'; inp.placeholder='Spielername'; inp.value=name||''; const rm=document.createElement('button'); rm.textContent='X'; rm.className='danger'; rm.onclick=()=>row.remove(); row.appendChild(inp); row.appendChild(rm); playerInputs.appendChild(row); }
 addPlayerRow('Spieler 1'); addPlayerRow('Spieler 2');
@@ -681,7 +679,7 @@ document.getElementById('startBtn').onclick=()=>{
   if(names.length<1){alert('Mindestens einen Spieler!');return;}
   if(SONGS.length<names.length+5){alert('Zu wenige Lieder!');return;}
   deck=shuffle([...SONGS]);
-  players=names.map(n=>({name:n,score:1,timeline:[deck.pop()],stealTokens:3}));
+  players=names.map(n=>({name:n,timeline:[deck.pop()],stealTokens:3}));
   winTarget=Math.min(parseInt(document.getElementById('winTarget').value)||10,SONGS.length);
   currentTurn=0;
   document.getElementById('setup').classList.add('hidden-section');
@@ -697,18 +695,16 @@ document.getElementById('startBtn').onclick=()=>{
   renderScoreboard(); renderTimeline(); updateDeckCount(); pushState();
 };
 
-// ── SPOTIFY PLAYER ─────────────────────────────────────────
 let spotifyIFrameAPIReady=null, currentController=null, pendingTrackIdForApi=null;
 window.onSpotifyIframeApiReady=API=>{ spotifyIFrameAPIReady=API; if(pendingTrackIdForApi){createSpotifyController(pendingTrackIdForApi);pendingTrackIdForApi=null;} };
 function createSpotifyController(trackId){ const t=document.getElementById('spotifyEmbedTarget'); if(!t)return; if(!spotifyIFrameAPIReady){pendingTrackIdForApi=trackId;return;} spotifyIFrameAPIReady.createController(t,{uri:'spotify:track:'+trackId},c=>{ currentController=c; c.addListener('playback_update',e=>{ const o=document.getElementById('overlay'); if(o)o.textContent=e.data.isPaused?'▶':'⏸'; }); }); }
 function destroyCurrentController(){ if(currentController){try{currentController.destroy();}catch(e){}currentController=null;} }
 
-// ── GAME LOGIC ─────────────────────────────────────────────
 function updateDeckCount(){ document.getElementById('deckCount').textContent='Noch '+deck.length+' Songs im Stapel'; }
 
 function renderScoreboard(){
   const sb=document.getElementById('scoreboard'); sb.innerHTML='';
-  players.forEach((p,idx)=>{ const b=document.createElement('div'); b.className='playerBadge'+(idx===currentTurn?' active':''); b.innerHTML=p.name+' <span class="count">'+p.score+'/'+winTarget+'</span> 🃏 '+p.stealTokens; sb.appendChild(b); });
+  players.forEach((p,idx)=>{ const b=document.createElement('div'); b.className='playerBadge'+(idx===currentTurn?' active':''); b.innerHTML=p.name+' <span class="count">'+p.timeline.length+'/'+winTarget+'</span> 🃏 '+p.stealTokens; sb.appendChild(b); });
 }
 
 function drawSong(){
@@ -761,7 +757,6 @@ function makeCardEl(card){ const el=document.createElement('div'); el.className=
 function makePendingCardEl(){ const el=document.createElement('div'); el.className='card hidden pending'; el.id='pendingCard'; return el; }
 function addPendingCardToTimeline(){ pendingIndex=null; renderTimeline(); }
 
-// ── KLAUEN ─────────────────────────────────────────────────
 function openStealPanel(){
   if(players.length<=1){doReveal();return;}
   stealMode='waiting'; stealingPlayerIndex=null; stealPendingIndex=null;
@@ -897,19 +892,19 @@ function resolveWithSteal(){
   const stealCorrect=pendingSong.year>=sL&&pendingSong.year<=sU;
   const banner=document.getElementById('resultBanner'), song=pendingSong, si=stealingPlayerIndex;
   const ag=document.getElementById('artistGuessInput').value, tg=document.getElementById('titleGuessInput').value;
-  const ac=guessMatches(ag,song.artist), tc=guessMatches(tg,song.title), bp=(ac?1:0)+(tc?1:0);
-  let bm=''; if(ac&&tc){ bm=' 🎯 Interpret & Titel beide richtig! (+2 Punkte, +1 Token)'; players[si].stealTokens++; } else if(ac)bm=' 🎯 Interpret richtig! (+1)'; else if(tc)bm=' 🎯 Titel richtig! (+1)';
+  const ac=guessMatches(ag,song.artist), tc=guessMatches(tg,song.title);
+  let bm=''; if(ac&&tc){ bm=' 🎯 Interpret & Titel richtig! (+1 Token)'; players[si].stealTokens++; } else if(ac||tc) bm=' 🎯 Einer richtig! (+0.5 Token)';
   if(document.getElementById('overlay'))document.getElementById('overlay').style.display='none';
   if(currentController){try{currentController.pause();}catch(e){}}
 
   if(activeCorrect&&stealCorrect){
-    players[currentTurn].score++; players[currentTurn].timeline.push(song); if(bp>0)players[currentTurn].score+=bp;
+    players[currentTurn].timeline.push(song);
     banner.className='show ok'; banner.textContent='Beide richtig! "'+song.title+'" ('+song.year+') – '+players[currentTurn].name+' behält (Heimvorteil).'+bm;
   } else if(activeCorrect&&!stealCorrect){
-    players[currentTurn].score++; players[currentTurn].timeline.push(song); if(bp>0)players[currentTurn].score+=bp;
+    players[currentTurn].timeline.push(song);
     banner.className='show ok'; banner.textContent=players[currentTurn].name+' richtig, '+players[si].name+' falsch! "'+song.title+'" ('+song.year+') bleibt bei '+players[currentTurn].name+'.'+bm;
   } else if(!activeCorrect&&stealCorrect){
-    players[si].score++; players[si].timeline.push(song);
+    players[si].timeline.push(song);
     banner.className='show bad'; banner.textContent='🃏 Geklaut! '+players[currentTurn].name+' lag falsch, '+players[si].name+' richtig! "'+song.title+'" ('+song.year+') geht an '+players[si].name+'!';
   } else {
     banner.className='show bad'; banner.textContent='Beide falsch! "'+song.title+'" ist von '+song.year+'. Karte abgeworfen.';
@@ -955,7 +950,6 @@ document.getElementById('noStealRevealBtn').onclick=()=>{
   }
 };
 
-// ── NORMALES AUFLÖSEN ──────────────────────────────────────
 function doReveal(remoteGuesses){
   if(pendingIndex==null){if(mode!=='companion')alert('Wähle erst einen Platz!');return;}
   const sorted=[...players[currentTurn].timeline].sort((a,b)=>a.year-b.year).map(c=>c.year);
@@ -963,14 +957,13 @@ function doReveal(remoteGuesses){
   const correct=pendingSong.year>=lower&&pendingSong.year<=upper;
   const ag=remoteGuesses?(remoteGuesses.artist||''):document.getElementById('artistGuessInput').value;
   const tg=remoteGuesses?(remoteGuesses.title||''):document.getElementById('titleGuessInput').value;
-  const ac=guessMatches(ag,pendingSong.artist), tc=guessMatches(tg,pendingSong.title), bp=(ac?1:0)+(tc?1:0);
+  const ac=guessMatches(ag,pendingSong.artist), tc=guessMatches(tg,pendingSong.title);
   if(document.getElementById('overlay'))document.getElementById('overlay').style.display='none';
   if(currentController){try{currentController.pause();}catch(e){}}
   const banner=document.getElementById('resultBanner');
-  let bm=''; if(ac&&tc){ bm=' 🎯 Interpret & Titel beide richtig! (+2 Punkte, +1 Token)'; players[currentTurn].stealTokens++; } else if(ac)bm=' 🎯 Interpret richtig! (+1)'; else if(tc)bm=' 🎯 Titel richtig! (+1)';
-  if(correct){ banner.className='show ok'; banner.textContent='Richtig! "'+pendingSong.title+'" ist von '+pendingSong.year+'.'+bm; players[currentTurn].score++; players[currentTurn].timeline.push(pendingSong); }
+  let bm=''; if(ac&&tc){ bm=' 🎯 Interpret & Titel richtig! (+1 Token)'; players[currentTurn].stealTokens++; } else if(ac||tc) bm=' 🎯 Einer richtig! (+0.5 Token)';
+  if(correct){ banner.className='show ok'; banner.textContent='Richtig! "'+pendingSong.title+'" ist von '+pendingSong.year+'.'+bm; players[currentTurn].timeline.push(pendingSong); }
   else { banner.className='show bad'; banner.textContent='Falsch! "'+pendingSong.title+'" ist von '+pendingSong.year+'. Karte abgeworfen.'+bm; }
-  if(bp>0)players[currentTurn].score+=bp;
   pendingSong=null; pendingIndex=null; pendingCardActive=false; clearBonusGuessInputs();
   renderScoreboard(); renderTimeline();
   document.getElementById('revealBtn').disabled=true;

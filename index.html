@@ -169,10 +169,10 @@
       <input type="checkbox" id="multiplayerToggle" style="width:auto;margin:0;"> Mit zweitem Handy synchronisieren
     </label>
   </div>
- <div style="text-align:center; display: flex; gap: 8px; justify-content: center;">
-  <button class="danger" onclick="goBackToPlaylist()" style="flex: 1;">← Zurück</button>
-  <button id="startBtn" style="flex: 1;">Spiel starten</button>
-</div>
+  <div style="text-align:center; display: flex; gap: 8px; justify-content: center;">
+    <button class="danger" onclick="goBackToPlaylist()" style="flex: 1;">← Zurück</button>
+    <button id="startBtn" style="flex: 1;">Spiel starten</button>
+  </div>
 </div>
 
 <!-- GAME -->
@@ -395,6 +395,16 @@ function abortGame() {
   }
 }
 
+function goBackToPlaylist() {
+  players=[]; deck=[]; SONGS=[];
+  document.getElementById('setup').classList.add('hidden-section');
+  document.getElementById('apiSetup').classList.remove('hidden-section');
+  document.getElementById('playlistInput').value = '';
+  document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge den Playlist-Link ein.';
+  document.getElementById('playlistStatus').style.color = '#2ec4b6';
+  renderPlaylistHistory();
+}
+
 // ── UTILS ──────────────────────────────────────────────────
 function isMyTurn() { if(mode!=='companion')return true; if(myPlayerIndex===null)return true; return currentTurn===myPlayerIndex; }
 function normalizeGuess(s) { return(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').trim(); }
@@ -591,7 +601,6 @@ async function loadPlaylist() {
     d.items.forEach(entry=>{ const t=entry&&entry.item; if(t&&t.id){ const y=t.album&&t.album.release_date?parseInt(t.album.release_date.split('-')[0]):2024; SONGS.push({title:t.name||"Unbekannt",artist:t.artists?t.artists.map(a=>a.name).join(', '):"Unbekannt",year:y,id:t.id}); } });
     if(SONGS.length<5) throw new Error("Zu wenige Lieder.");
     s.style.color="#2ec4b6"; s.innerText=SONGS.length+" Lieder geladen!";
-   
     setTimeout(()=>{ document.getElementById('apiSetup').classList.add('hidden-section'); document.getElementById('setup').classList.remove('hidden-section'); },1500);
   } catch(e){ s.style.color="#ff5757"; s.innerText="Fehler: "+e.message; }
 }
@@ -614,22 +623,13 @@ const playerInputs=document.getElementById('playerInputs');
 function addPlayerRow(name){ const row=document.createElement('div'); row.className='playerRow'; const inp=document.createElement('input'); inp.type='text'; inp.placeholder='Spielername'; inp.value=name||''; const rm=document.createElement('button'); rm.textContent='X'; rm.className='danger'; rm.onclick=()=>row.remove(); row.appendChild(inp); row.appendChild(rm); playerInputs.appendChild(row); }
 addPlayerRow('Spieler 1'); addPlayerRow('Spieler 2');
 document.getElementById('addPlayerBtn').onclick=()=>addPlayerRow('');
-  function goBackToPlaylist() {
-  players=[]; deck=[]; SONGS=[];
-  document.getElementById('setup').classList.add('hidden-section');
-  document.getElementById('apiSetup').classList.remove('hidden-section');
-  document.getElementById('playlistInput').value = '';
-  document.getElementById('playlistStatus').textContent = '✓ Verbunden! Füge den Playlist-Link ein.';
-  document.getElementById('playlistStatus').style.color = '#2ec4b6';
-  renderPlaylistHistory();
-}
 
 document.getElementById('startBtn').onclick=()=>{
   const names=[...playerInputs.querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean);
   if(names.length<1){alert('Mindestens einen Spieler!');return;}
   if(SONGS.length<names.length+5){alert('Zu wenige Lieder!');return;}
   deck=shuffle([...SONGS]);
-  players=names.map(n=>({name:n,score:1,timeline:[deck.pop()]}));
+  players=names.map(n=>({name:n,score:1,timeline:[deck.pop()],stealTokens:3}));
   winTarget=Math.min(parseInt(document.getElementById('winTarget').value)||10,SONGS.length);
   currentTurn=0;
   document.getElementById('setup').classList.add('hidden-section');
@@ -655,7 +655,7 @@ function updateDeckCount(){ document.getElementById('deckCount').textContent='No
 
 function renderScoreboard(){
   const sb=document.getElementById('scoreboard'); sb.innerHTML='';
-  players.forEach((p,idx)=>{ const b=document.createElement('div'); b.className='playerBadge'+(idx===currentTurn?' active':''); b.innerHTML=p.name+' <span class="count">'+p.score+'/'+winTarget+'</span>'; sb.appendChild(b); });
+  players.forEach((p,idx)=>{ const b=document.createElement('div'); b.className='playerBadge'+(idx===currentTurn?' active':''); b.innerHTML=p.name+' <span class="count">'+p.score+'/'+winTarget+'</span> 🃏 '+p.stealTokens; sb.appendChild(b); });
 }
 
 function drawSong(){
@@ -719,13 +719,21 @@ function openStealPanel(){
   document.getElementById('stealResolveArea').classList.add('hidden-section');
   document.getElementById('noStealArea').classList.remove('hidden-section');
   const bw=document.getElementById('stealPlayerButtons'); bw.innerHTML=''; bw.classList.remove('hidden-section');
+  let hasStealOption=false;
   players.forEach((p,idx)=>{
     if(idx===currentTurn)return;
     const btn=document.createElement('button'); btn.className='steal';
-    btn.textContent='🃏 '+p.name+' klaut!';
+    const hasTokens=p.stealTokens>0;
+    if(hasTokens) hasStealOption=true;
+    btn.textContent='🃏 '+p.name+' klaut! ('+p.stealTokens+')';
+    btn.disabled=!hasTokens;
     btn.onclick=(i=>()=>startStealing(i))(idx);
     bw.appendChild(btn);
   });
+  if(!hasStealOption){
+    document.getElementById('stealPlayerButtons').classList.add('hidden-section');
+    document.getElementById('noStealArea').classList.remove('hidden-section');
+  }
   document.getElementById('stealPanel').classList.remove('hidden-section');
   pushState();
 }
@@ -738,6 +746,7 @@ function startStealing(playerIdx){
   document.getElementById('noStealArea').classList.add('hidden-section');
   document.getElementById('stealPlacementArea').classList.remove('hidden-section');
   document.getElementById('stealReadyBtn').disabled=true;
+  document.getElementById('stealReadyBtn').textContent='✅ Fertig – beide auflösen! (jeder kann drücken)';
   document.getElementById('stealResolveArea').classList.remove('hidden-section');
   renderStealTimeline(); pushState();
 }
@@ -755,12 +764,28 @@ function renderStealTimeline(){
     tl.appendChild(el);
     const si=i+1; if(stealPendingIndex===si)tl.appendChild(makeStealPendingCardEl()); tl.appendChild(makeStealSlot(si));
   });
+  updateStealReadyBtn();
+}
+
+function updateStealReadyBtn(){
+  const btn=document.getElementById('stealReadyBtn');
+  if(stealPendingIndex===null){
+    btn.disabled=true;
+    return;
+  }
+  const isHostStealing=(stealingPlayerIndex===myPlayerIndex&&mode==='companion')||mode==='host';
+  if(isMultiplayer&&mode==='companion'){
+    if(stealingPlayerIndex===myPlayerIndex) btn.disabled=false;
+    else btn.disabled=true;
+  } else {
+    btn.disabled=false;
+  }
 }
 
 function makeStealSlot(index){
   const slot=document.createElement('div'); slot.className='stealSlot'+(stealPendingIndex===index?' selected':''); slot.dataset.index=index;
   const line=document.createElement('div'); line.className='dropline'; line.textContent='Hier'; slot.appendChild(line);
-  slot.onclick=(i=>()=>{ stealPendingIndex=i; document.getElementById('stealReadyBtn').disabled=false; renderStealTimeline(); })(index);
+  slot.onclick=(i=>()=>{ stealPendingIndex=i; renderStealTimeline(); })(index);
   return slot;
 }
 function makeStealPendingCardEl(){ const el=document.createElement('div'); el.className='stealCard hidden pending'; return el; }
@@ -779,7 +804,19 @@ function renderStealPanelFromState(){
   document.getElementById('activePlayerName').textContent=activeName;
   document.getElementById('activePlayerName2').textContent=activeName;
   const bw=document.getElementById('stealPlayerButtons'); bw.innerHTML='';
-  players.forEach((p,idx)=>{ if(idx===currentTurn)return; const btn=document.createElement('button'); btn.className='steal'; btn.textContent='🃏 '+p.name+' klaut!'; btn.onclick=(i=>()=>startStealing(i))(idx); bw.appendChild(btn); });
+  let hasStealOption=false;
+  players.forEach((p,idx)=>{ 
+    if(idx===currentTurn)return; 
+    const hasTokens=p.stealTokens>0;
+    if(hasTokens) hasStealOption=true;
+    const btn=document.createElement('button'); 
+    btn.className='steal'; 
+    btn.textContent='🃏 '+p.name+' klaut! ('+p.stealTokens+')'; 
+    btn.disabled=!hasTokens;
+    btn.onclick=(i=>()=>startStealing(i))(idx); 
+    bw.appendChild(btn); 
+  });
+  if(!hasStealOption) bw.classList.add('hidden-section');
   if(stealMode==='placing'&&stealingPlayerIndex!==null){
     document.getElementById('stealingPlayerName').textContent=players[stealingPlayerIndex].name;
     document.getElementById('activePlayerName3').textContent=activeName;
@@ -808,7 +845,7 @@ function resolveWithSteal(){
   const banner=document.getElementById('resultBanner'), song=pendingSong, si=stealingPlayerIndex;
   const ag=document.getElementById('artistGuessInput').value, tg=document.getElementById('titleGuessInput').value;
   const ac=guessMatches(ag,song.artist), tc=guessMatches(tg,song.title), bp=(ac?1:0)+(tc?1:0);
-  let bm=''; if(ac&&tc)bm=' 🎯 Interpret & Titel beide richtig! (+2)'; else if(ac)bm=' 🎯 Interpret richtig! (+1)'; else if(tc)bm=' 🎯 Titel richtig! (+1)';
+  let bm=''; if(ac&&tc){ bm=' 🎯 Interpret & Titel beide richtig! (+2 Punkte, +1 Token)'; players[si].stealTokens++; } else if(ac)bm=' 🎯 Interpret richtig! (+1)'; else if(tc)bm=' 🎯 Titel richtig! (+1)';
   if(document.getElementById('overlay'))document.getElementById('overlay').style.display='none';
   if(currentController){try{currentController.pause();}catch(e){}}
 
@@ -827,6 +864,7 @@ function resolveWithSteal(){
 
   pendingSong=null; pendingIndex=null; pendingCardActive=false;
   stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
+  if(si!==null&&si!==undefined) players[si].stealTokens--;
   clearBonusGuessInputs();
   document.getElementById('stealPanel').classList.add('hidden-section');
   document.getElementById('stealResolveArea').classList.add('hidden-section');
@@ -837,13 +875,17 @@ function resolveWithSteal(){
   document.getElementById('nextTurnBtn').disabled=false;
   if(!checkWinner(currentTurn)&&stealCorrect&&!activeCorrect) checkWinner(si);
   pushState();
+  if(isMultiplayer&&mode==='host') db.ref('rooms/'+roomCode+'/stealResolved').set(Date.now());
 }
 
 document.getElementById('stealReadyBtn').onclick=()=>{
-  if(isMultiplayer&&mode==='companion'){
-    document.getElementById('npLabel').textContent='Auflösung angefragt...';
+  if(!isMultiplayer||mode==='host'){
+    resolveWithSteal();
+  } else if(mode==='companion'){
+    document.getElementById('stealReadyBtn').disabled=true;
+    document.getElementById('stealReadyBtn').textContent='✅ Wird aufgelöst...';
     sendCompanionAction('resolveSteal');
-  } else { resolveWithSteal(); }
+  }
 };
 document.getElementById('stealCancelBtn').onclick=()=>{
   if(isMultiplayer&&mode==='companion'){
@@ -872,7 +914,7 @@ function doReveal(remoteGuesses){
   if(document.getElementById('overlay'))document.getElementById('overlay').style.display='none';
   if(currentController){try{currentController.pause();}catch(e){}}
   const banner=document.getElementById('resultBanner');
-  let bm=''; if(ac&&tc)bm=' 🎯 Interpret & Titel beide richtig! (+2)'; else if(ac)bm=' 🎯 Interpret richtig! (+1)'; else if(tc)bm=' 🎯 Titel richtig! (+1)';
+  let bm=''; if(ac&&tc){ bm=' 🎯 Interpret & Titel beide richtig! (+2 Punkte, +1 Token)'; players[currentTurn].stealTokens++; } else if(ac)bm=' 🎯 Interpret richtig! (+1)'; else if(tc)bm=' 🎯 Titel richtig! (+1)';
   if(correct){ banner.className='show ok'; banner.textContent='Richtig! "'+pendingSong.title+'" ist von '+pendingSong.year+'.'+bm; players[currentTurn].score++; players[currentTurn].timeline.push(pendingSong); }
   else { banner.className='show bad'; banner.textContent='Falsch! "'+pendingSong.title+'" ist von '+pendingSong.year+'. Karte abgeworfen.'+bm; }
   if(bp>0)players[currentTurn].score+=bp;

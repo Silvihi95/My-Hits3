@@ -103,7 +103,7 @@
 <h1>My-Hits</h1>
 <div class="subtitle">Automatische Playlist-Anbindung · Timeline-Kartenspiel</div>
 
-<!-- ZWEITES HANDY -->
+<!-- WEITERE HANDYS -->
 <div id="joinPanel" class="panel" style="max-width:900px;margin:0 auto 16px;">
   <h3>Schon ein Spiel auf einem anderen Handy gestartet?</h3>
   <p style="font-size:0.85em;opacity:0.8;">Dann gib hier den 4-stelligen Code ein oder scanne den QR-Code.</p>
@@ -171,7 +171,7 @@
   <div class="panel">
     <h3>Mehrspieler</h3>
     <label style="display:flex;align-items:center;gap:8px;font-weight:normal;margin-bottom:0;">
-      <input type="checkbox" id="multiplayerToggle" style="width:auto;margin:0;"> Mit zweitem Handy synchronisieren
+      <input type="checkbox" id="multiplayerToggle" style="width:auto;margin:0;"> Mit bis zu vier Handys synchronisieren
     </label>
   </div>
   <div style="text-align:center; display: flex; gap: 8px; justify-content: center;">
@@ -420,7 +420,12 @@ function cancelPlaylist() {
 }
 
 function abortGame() {
+  if (mode === 'companion') { alert('Das Spiel kann nur am Hauptgerät beendet werden.'); return; }
   if (!confirm('Spiel wirklich abbrechen und neue Playlist laden?')) return;
+  if (mode === 'host' && db && roomCode) {
+    db.ref('rooms/' + roomCode).remove().catch(console.error);
+    db.ref('rooms/' + roomCode + '/requests').off();
+  }
   players=[]; deck=[]; pendingSong=null; pendingIndex=null; pendingCardActive=false;
   stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
   currentTurn=0; SONGS=[];
@@ -451,7 +456,10 @@ function goBackToPlaylist() {
   renderPlaylistHistory();
 }
 
-function isMyTurn() { if(mode!=='companion')return true; if(myPlayerIndex===null)return true; return currentTurn===myPlayerIndex; }
+function isMyTurn() {
+  return mode !== 'companion' ||
+    (myPlayerIndex !== null && currentTurn === myPlayerIndex);
+}
 function normalizeGuess(s) { return(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'').trim(); }
 function guessMatches(g,a) { const gn=normalizeGuess(g),an=normalizeGuess(a); if(!gn||!an)return false; return an.includes(gn)||gn.includes(an); }
 function clearBonusGuessInputs() { const a=document.getElementById('artistGuessInput'),t=document.getElementById('titleGuessInput'); if(a)a.value=''; if(t)t.value=''; }
@@ -482,60 +490,206 @@ function serializeState() {
     updatedAt:Date.now()
   };
 }
-function pushState() { if(!isMultiplayer||mode!=='host'||!db||!roomCode)return; db.ref('rooms/'+roomCode).set(serializeState()); }
+function pushState() {
+  if (!isMultiplayer || mode !== 'host' || !db || !roomCode) return;
+
+  db.ref('rooms/' + roomCode).update(serializeState());
+}
+
+// Jede Anfrage bekommt eine eigene Firebase-ID; der Host bearbeitet sie nacheinander.
+let actionProcessing = Promise.resolve();
+let companionDeviceId = null;
 
 function subscribeHostToPlacement() {
-  db.ref('rooms/'+roomCode+'/placementRequest').on('value', snap=>{
-    const val=snap.val();
-    if(val!==null&&val!==undefined&&pendingCardActive){
-      pendingIndex=parseInt(val);
-      document.getElementById('npLabel').textContent='Karte platziert (2. Handy). Klauen-Phase...';
-      renderTimeline();
-      db.ref('rooms/'+roomCode+'/placementRequest').set(null);
-      openStealPanel();
-      pushState();
-    }
-  });
+  // Platzierungen laufen ebenfalls über die Aktionswarteschlange.
 }
 
 function subscribeHostToActions() {
-  db.ref('rooms/'+roomCode+'/actionRequest').on('value', snap=>{
-    const val=snap.val();
-    if(!val||!val.type)return;
-    db.ref('rooms/'+roomCode+'/actionRequest').set(null);
-    if(val.type==='reveal') doReveal({artist:val.artistGuess,title:val.titleGuess});
-    else if(val.type==='nextTurn') doNextTurn();
-    else if(val.type==='resolveSteal') resolveWithSteal();
-    else if(val.type==='cancelSteal') cancelStealing();
-    else if(val.type==='noStealReveal') {
-      stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
-      document.getElementById('stealPanel').classList.add('hidden-section');
-      doReveal();
-    }
+  const requests = db.ref('rooms/' + roomCode + '/requests');
+  requests.on('child_added', snapshot => {
+    const requestRef = snapshot.ref;
+    const val = snapshot.val();
+    actionProcessing = actionProcessing.then(async () => {
+      try {
+        if (!val || !val.type || mode !== 'host') return;
+        const sender = Number(val.playerIndex);
+        if (!Number.isInteger(sender) || sender < 1 || sender >= players.length) return;
+        const device = val.deviceId;
+        if (typeof device !== 'string' || !device) return;
+        const registered = await db.ref('rooms/' + roomCode + '/playerSlots/' + sender).once('value');
+        if (registered.val() !== device) return;
+        // Verspätete Aktionen aus einem vorherigen Song ignorieren.
+        if (val.turnMarker !== pendingMarker) return;
+        const index = Number(val.index);
+        const validIndex = Number.isInteger(index) && index >= 0 &&
+          index <= players[currentTurn].timeline.length;
+        switch (val.type) {
+          case 'placeCard':
+            if (sender !== currentTurn || !pendingCardActive || pendingIndex !== null ||
+                stealMode || !validIndex) return;
+            pendingIndex = index;
+            document.getElementById('npLabel').textContent =
+              'Karte platziert von ' + players[sender].name + '. Klauen-Phase...';
+            renderTimeline();
+            openStealPanel();
+            break;
+          case 'startSteal':
+            if (stealMode === 'waiting' && sender !== currentTurn &&
+                players[sender].stealTokens > 0) startStealing(sender);
+            break;
+          case 'placeSteal':
+            if (stealMode !== 'placing' || stealingPlayerIndex !== sender || !validIndex) return;
+            stealPendingIndex = index;
+            renderStealTimeline();
+            pushState();
+            break;
+          case 'resolveSteal':
+            if (stealMode === 'placing' && stealingPlayerIndex === sender &&
+                stealPendingIndex !== null) resolveWithSteal();
+            break;
+          case 'cancelSteal':
+            if (stealMode === 'placing' && stealingPlayerIndex === sender) cancelStealing();
+            break;
+          case 'noStealReveal':
+            if (stealMode !== 'waiting' || sender !== currentTurn || pendingIndex === null) return;
+            stealMode = false;
+            stealingPlayerIndex = null;
+            stealPendingIndex = null;
+            document.getElementById('stealPanel').classList.add('hidden-section');
+            doReveal({artist: val.artistGuess, title: val.titleGuess});
+            break;
+          case 'reveal':
+            if (sender === currentTurn && pendingCardActive && pendingIndex !== null &&
+                !stealMode) doReveal({artist: val.artistGuess, title: val.titleGuess});
+            break;
+          case 'nextTurn':
+            if (sender === currentTurn && !pendingCardActive &&
+                !document.getElementById('nextTurnBtn').disabled) doNextTurn();
+            break;
+        }
+      } finally {
+        await requestRef.remove();
+      }
+    }).catch(error => console.error('Firebase-Aktion fehlgeschlagen:', error));
   });
 }
 
-function sendCompanionAction(type,extra) {
-  db.ref('rooms/'+roomCode+'/actionRequest').set(Object.assign({type,ts:Date.now()},extra||{}));
+function sendCompanionAction(type, extra = {}) {
+  if (mode !== 'companion' || myPlayerIndex === null || !companionDeviceId) return;
+  return db.ref('rooms/' + roomCode + '/requests').push({
+    ...extra,
+    type,
+    playerIndex: myPlayerIndex,
+    deviceId: companionDeviceId,
+    timestamp: firebase.database.ServerValue.TIMESTAMP,
+    turnMarker: lastSnapshotData ? lastSnapshotData.pendingMarker : null
+  }).catch(error => {
+    console.error('Senden fehlgeschlagen:', error);
+    alert('Aktion konnte nicht gesendet werden. Bitte Verbindung prüfen.');
+  });
 }
 
 async function joinRoom() {
-  const c=document.getElementById('joinCodeInput').value.trim();
-  if(!/^[0-9]{4}$/.test(c)){document.getElementById('joinStatus').textContent='Bitte 4-stelligen Code eingeben.';return;}
-  roomCode=c; mode='companion'; isMultiplayer=true;
- myPlayerIndex = 1; // Spieler 2 (Index 1)
-window.localStorage.setItem('my_player_index_'+roomCode, '1');
-  document.getElementById('joinStatus').textContent='Verbinde...';
-  db=initFirebaseIfNeeded();
-  ['joinPanel','apiSetup','setup'].forEach(id=>document.getElementById(id).classList.add('hidden-section'));
-  document.getElementById('game').classList.remove('hidden-section');
-  document.getElementById('drawBtn').style.display='none';
-  document.getElementById('swapBtn').style.display='none';
-  document.getElementById('roleBanner').textContent='Mitspieler-Handy · Raum '+roomCode;
-  document.getElementById('npLabel').textContent='Warte auf Haupt-Handy...';
-  db.ref('rooms/'+roomCode).on('value', snap=>{ const data=snap.val(); if(!data)return; renderFromSnapshot(data); });
+  const c = document.getElementById('joinCodeInput').value.trim();
+
+  if (!/^[0-9]{4}$/.test(c)) {
+    document.getElementById('joinStatus').textContent =
+      'Bitte 4-stelligen Code eingeben.';
+    return;
+  }
+
+  roomCode = c;
+  mode = 'companion';
+  isMultiplayer = true;
+  db = initFirebaseIfNeeded();
+
+  const roomRef = db.ref('rooms/' + roomCode);
+  const deviceKey = 'my_hits_device_id_' + roomCode;
+  let deviceId = localStorage.getItem(deviceKey);
+
+  if (!deviceId) {
+  deviceId = window.crypto.randomUUID();
+    localStorage.setItem(deviceKey, deviceId);
+  }
+
+  document.getElementById('joinStatus').textContent = 'Verbinde...';
+
+  try {
+    const roomSnapshot = await roomRef.once('value');
+const roomData = roomSnapshot.val();
+
+if (!roomData || !Array.isArray(roomData.players)) {
+  throw new Error('Spielraum nicht gefunden oder noch nicht bereit.');
 }
 
+const maxPlayers = Math.min(roomData.players.length, 4);
+    const result = await roomRef.child('playerSlots').transaction(slots => {
+     if (slots === null || typeof slots !== 'object') {
+  slots = {};
+}
+
+      const existing = Object.keys(slots).find(
+        key => slots[key] === deviceId
+      );
+
+      if (existing !== undefined) return slots;
+
+      for (let i = 1; i < maxPlayers; i++) {
+        if (!slots[i]) {
+          slots[i] = deviceId;
+          return slots;
+        }
+      }
+
+      return;
+    });
+
+    if (!result.committed) {
+      document.getElementById('joinStatus').textContent =
+        'Raum nicht bereit oder alle Spielerplätze belegt.';
+      return;
+    }
+
+    const slots = result.snapshot.val();
+
+    myPlayerIndex = Number(
+      Object.keys(slots).find(key => slots[key] === deviceId)
+    );
+
+    if (
+  !Number.isInteger(myPlayerIndex) ||
+  myPlayerIndex < 1 ||
+  myPlayerIndex >= maxPlayers
+) {
+      throw new Error('Spielerplatz konnte nicht zugewiesen werden.');
+    }
+
+    companionDeviceId = deviceId;
+
+    ['joinPanel', 'apiSetup', 'setup'].forEach(id =>
+      document.getElementById(id).classList.add('hidden-section')
+    );
+
+    document.getElementById('game').classList.remove('hidden-section');
+    document.getElementById('drawBtn').style.display = 'none';
+    document.getElementById('swapBtn').style.display = 'none';
+
+    document.getElementById('roleBanner').textContent =
+      'Mitspieler-Handy · Spieler ' + (myPlayerIndex + 1);
+
+    document.getElementById('npLabel').textContent =
+      'Warte auf Haupt-Handy...';
+
+    roomRef.on('value', snap => {
+      const data = snap.val();
+      if (data) renderFromSnapshot(data);
+    });
+
+  } catch (error) {
+    document.getElementById('joinStatus').textContent =
+      'Verbindung fehlgeschlagen: ' + error.message;
+  }
+}
 function renderFromSnapshot(data) {
   lastSnapshotData=data;
   players=data.players||[]; winTarget=data.winTarget||10; currentTurn=data.currentTurn||0;
@@ -545,13 +699,14 @@ function renderFromSnapshot(data) {
   stealingPlayerIndex=data.stealingPlayerIndex==null?null:data.stealingPlayerIndex;
   stealPendingIndex=data.stealPendingIndex==null?null:data.stealPendingIndex;
 
- if(mode==='companion'){
+if (mode === 'companion') {
   document.getElementById('playerPickPanel').classList.add('hidden-section');
 
-  if(myPlayerIndex!==null&&players[myPlayerIndex]){
-    document.getElementById('roleBanner').textContent=
-      'Mitspieler-Handy · Du spielst als '+
-      players[myPlayerIndex].name+' · Raum '+roomCode;
+  if (myPlayerIndex !== null && players[myPlayerIndex]) {
+    document.getElementById('roleBanner').textContent =
+      '📱 Spieler ' + (myPlayerIndex + 1) +
+      ' · ' + players[myPlayerIndex].name +
+      ' · Raum ' + roomCode;
   }
 }
 
@@ -583,6 +738,14 @@ function renderFromSnapshot(data) {
 
   if(stealMode){ renderStealPanelFromState(); }
   else { document.getElementById('stealPanel').classList.add('hidden-section'); }
+  if (mode === 'companion') {
+    document.getElementById('noStealRevealBtn').disabled =
+      !isMyTurn() || stealMode !== 'waiting';
+    document.getElementById('stealCancelBtn').disabled =
+      stealingPlayerIndex !== myPlayerIndex || stealMode !== 'placing';
+    document.getElementById('stealReadyBtn').disabled =
+      stealingPlayerIndex !== myPlayerIndex || stealPendingIndex === null;
+  }
 
   if(data.winner){
     document.getElementById('game').classList.add('hidden-section');
@@ -674,13 +837,16 @@ function addPlayerRow(name){ const row=document.createElement('div'); row.classN
 addPlayerRow('Spieler 1'); addPlayerRow('Spieler 2');
 document.getElementById('addPlayerBtn').onclick=()=>addPlayerRow('');
 
-document.getElementById('startBtn').onclick=()=>{
+document.getElementById('startBtn').onclick=async()=>{
   const names=[...playerInputs.querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean);
   if(names.length<1){alert('Mindestens einen Spieler!');return;}
   if(document.getElementById('multiplayerToggle').checked && names.length < 2){
-  alert('Für zwei Handys brauchst du mindestens zwei Spieler!');
+  alert('Für mehrere Handys brauchst du mindestens zwei Spieler!');
   return;
 }
+  if(document.getElementById('multiplayerToggle').checked && names.length > 4){
+    alert('Für die Handy-Synchronisierung sind maximal vier Spieler möglich.'); return;
+  }
   if(SONGS.length<names.length+5){alert('Zu wenige Lieder!');return;}
   deck=shuffle([...SONGS]);
   players=names.map(n=>({name:n,timeline:[deck.pop()],stealTokens:3}));
@@ -688,14 +854,30 @@ document.getElementById('startBtn').onclick=()=>{
   currentTurn=0;
   document.getElementById('setup').classList.add('hidden-section');
   document.getElementById('game').classList.remove('hidden-section');
-  if(document.getElementById('multiplayerToggle').checked){
-    mode='host'; isMultiplayer=true;
-    roomCode=String(Math.floor(1000+Math.random()*9000));
-    db=initFirebaseIfNeeded();
-    subscribeHostToPlacement(); subscribeHostToActions();
-    document.getElementById('roleBanner').textContent='Haupt-Handy · Code: '+roomCode;
-    generateRoomQR(roomCode);
+if(document.getElementById('multiplayerToggle').checked){
+  mode = 'host';
+  isMultiplayer = true;
+
+  db = initFirebaseIfNeeded();
+  let chosenCode = null;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const candidate = String(Math.floor(1000 + Math.random() * 9000));
+    const existing = await db.ref('rooms/' + candidate).once('value');
+    if (!existing.exists()) { chosenCode = candidate; break; }
   }
+  if (!chosenCode) { alert('Kein freier Spielcode gefunden. Bitte erneut versuchen.'); return; }
+  roomCode = chosenCode;
+
+ 
+
+  subscribeHostToPlacement();
+  subscribeHostToActions();
+
+  document.getElementById('roleBanner').textContent =
+    'Haupt-Handy · Code: ' + roomCode;
+
+  generateRoomQR(roomCode);
+}
   renderScoreboard(); renderTimeline(); updateDeckCount(); pushState();
 };
 
@@ -752,7 +934,12 @@ function makeSlot(index){
     if(!pendingCardActive)return; if(stealMode)return;
     if(isMultiplayer&&mode==='companion'&&!isMyTurn())return;
     const idx=parseInt(slot.dataset.index);
-    if(isMultiplayer&&mode==='companion'){ db.ref('rooms/'+roomCode+'/placementRequest').set(idx); document.getElementById('npLabel').textContent='Karte ausgewählt – sende an Haupt-Handy...'; }
+    if (isMultiplayer && mode === 'companion') {
+  sendCompanionAction('placeCard', { index: idx });
+
+  document.getElementById('npLabel').textContent =
+    'Karte ausgewählt – sende an Haupt-Handy...';
+}
     else { pendingIndex=idx; document.getElementById('npLabel').textContent='Karte platziert! Können andere klauen?'; document.getElementById('revealBtn').disabled=true; renderTimeline(); openStealPanel(); if(isMultiplayer&&mode==='host')pushState(); }
   };
   return slot;
@@ -790,17 +977,41 @@ function openStealPanel(){
   pushState();
 }
 
-function startStealing(playerIdx){
-  stealMode='placing'; stealingPlayerIndex=playerIdx; stealPendingIndex=null;
-  document.getElementById('stealingPlayerName').textContent=players[playerIdx].name;
-  document.getElementById('activePlayerName3').textContent=players[currentTurn].name;
+function startStealing(playerIdx) {
+  if (mode === 'companion') {
+    if (playerIdx !== myPlayerIndex) return;
+
+    sendCompanionAction('startSteal');
+    return;
+  }
+
+  if (
+    stealMode !== 'waiting' ||
+    playerIdx === currentTurn ||
+    !players[playerIdx] ||
+    players[playerIdx].stealTokens <= 0
+  ) return;
+
+  stealMode = 'placing';
+  stealingPlayerIndex = playerIdx;
+  stealPendingIndex = null;
+
+  document.getElementById('stealingPlayerName').textContent =
+    players[playerIdx].name;
+
+  document.getElementById('activePlayerName3').textContent =
+    players[currentTurn].name;
+
   document.getElementById('stealPlayerButtons').classList.add('hidden-section');
   document.getElementById('noStealArea').classList.add('hidden-section');
   document.getElementById('stealPlacementArea').classList.remove('hidden-section');
-  document.getElementById('stealReadyBtn').disabled=true;
-  document.getElementById('stealReadyBtn').textContent='✅ Fertig – beide auflösen! (jeder kann drücken)';
+  document.getElementById('stealReadyBtn').disabled = true;
+  document.getElementById('stealReadyBtn').textContent =
+    '✅ Fertig – beide auflösen! (jeder kann drücken)';
   document.getElementById('stealResolveArea').classList.remove('hidden-section');
-  renderStealTimeline(); pushState();
+
+  renderStealTimeline();
+  pushState();
 }
 
 function renderStealTimeline(){
@@ -836,21 +1047,40 @@ function updateStealReadyBtn(){
   }
 }
 
-function makeStealSlot(index){
-  const slot=document.createElement('div'); slot.className='stealSlot'+(stealPendingIndex===index?' selected':''); slot.dataset.index=index;
-  const line=document.createElement('div'); line.className='dropline'; line.textContent='Hier'; slot.appendChild(line);
-  slot.onclick=(i=>()=>{ stealPendingIndex=i; renderStealTimeline(); })(index);
-  return slot;
-}
-function makeStealPendingCardEl(){ const el=document.createElement('div'); el.className='stealCard hidden pending'; return el; }
+function makeStealSlot(index) {
+  const slot = document.createElement('div');
+  slot.className = 'stealSlot' +
+    (stealPendingIndex === index ? ' selected' : '');
 
-function cancelStealing(){
-  stealMode='waiting'; stealingPlayerIndex=null; stealPendingIndex=null;
-  document.getElementById('stealPlacementArea').classList.add('hidden-section');
-  document.getElementById('stealResolveArea').classList.add('hidden-section');
-  document.getElementById('stealPlayerButtons').classList.remove('hidden-section');
-  document.getElementById('noStealArea').classList.remove('hidden-section');
-  pushState();
+  slot.dataset.index = index;
+
+  const line = document.createElement('div');
+  line.className = 'dropline';
+  line.textContent = 'Hier';
+  slot.appendChild(line);
+
+  slot.onclick = () => {
+    if (stealMode !== 'placing') return;
+
+    if (mode === 'companion') {
+      if (stealingPlayerIndex !== myPlayerIndex) return;
+
+      sendCompanionAction('placeSteal', {
+        index: index
+      });
+
+      document.getElementById('npLabel').textContent =
+        'Klau-Position wird übertragen...';
+
+      return;
+    }
+
+    stealPendingIndex = index;
+    renderStealTimeline();
+    pushState();
+  };
+
+  return slot;
 }
 
 function renderStealPanelFromState(){
@@ -866,7 +1096,7 @@ function renderStealPanelFromState(){
     const btn=document.createElement('button'); 
     btn.className='steal'; 
     btn.textContent='🃏 '+p.name+' klaut! ('+p.stealTokens+')'; 
-    btn.disabled=!hasTokens;
+    btn.disabled = !hasTokens || (mode === 'companion' && idx !== myPlayerIndex);
     btn.onclick=(i=>()=>startStealing(i))(idx); 
     bw.appendChild(btn); 
   });
@@ -878,7 +1108,6 @@ function renderStealPanelFromState(){
     document.getElementById('noStealArea').classList.add('hidden-section');
     document.getElementById('stealPlacementArea').classList.remove('hidden-section');
     document.getElementById('stealResolveArea').classList.remove('hidden-section');
-    document.getElementById('stealReadyBtn').disabled=(stealPendingIndex==null);
     renderStealTimeline();
   } else {
     document.getElementById('stealPlayerButtons').classList.remove('hidden-section');
@@ -945,12 +1174,17 @@ document.getElementById('stealReadyBtn').onclick=()=>{
 };
 document.getElementById('stealCancelBtn').onclick=()=>{
   if(isMultiplayer&&mode==='companion'){
+    if (stealingPlayerIndex !== myPlayerIndex) return;
     sendCompanionAction('cancelSteal');
   } else { cancelStealing(); }
 };
 document.getElementById('noStealRevealBtn').onclick=()=>{
   if(isMultiplayer&&mode==='companion'){
-    sendCompanionAction('noStealReveal');
+    if (!isMyTurn() || stealMode !== 'waiting') return;
+    sendCompanionAction('noStealReveal', {
+      artistGuess: document.getElementById('artistGuessInput').value,
+      titleGuess: document.getElementById('titleGuessInput').value
+    });
   } else {
     stealMode=false; stealingPlayerIndex=null; stealPendingIndex=null;
     document.getElementById('stealPanel').classList.add('hidden-section');

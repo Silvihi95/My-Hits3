@@ -65,6 +65,7 @@
   #resultBanner.show { display:block; }
   #resultBanner.ok { background: rgba(46,196,182,0.25); color:#2ec4b6; }
   #resultBanner.bad { background: rgba(255,87,87,0.25); color:#ff5757; }
+  #resultBanner.show { font-size:1.12em; padding:16px; border:2px solid currentColor; }
   #winnerBox { text-align:center; }
   #winnerBox h2 { color:#ffde59; }
 
@@ -203,20 +204,36 @@
   </div>
   <div id="waitTurnBanner" class="panel hidden-section" style="text-align:center;font-weight:700;"></div>
   <div id="scoreboard"></div>
-  <div id="resultBanner"></div>
 
   <div id="nowPlaying" class="panel">
     <div id="npLabel">Bereit?</div>
     <div id="embedArea"></div>
     <div style="opacity:0.6;font-size:0.85em;margin-top:6px;">Klicke auf das gelbe Feld zum Abspielen. Wähle dann eine Position und bestätige sie.</div>
-    <div id="bonusGuessArea" style="margin-top:10px;text-align:left;">
-      <label style="margin-bottom:4px;">🎯 Bonus: Interpret & Songtitel raten (nur Token, keine Punkte)</label>
+  </div>
+
+  <div id="deckCount"></div>
+  <div id="controls">
+    <button id="drawBtn">Nächsten Song ziehen</button>
+    <button id="swapBtn" class="secondary" disabled>🔄 Song tauschen</button>
+    <button id="revealBtn" disabled>Auflösen</button>
+    <button id="nextTurnBtn" disabled>Nächster Spieler</button>
+  </div>
+
+  <div id="resultBanner" role="status" aria-live="polite" style="margin-top:12px;"></div>
+  <div id="timelineOwner" style="text-align:center;opacity:0.7;font-size:0.85em;margin-bottom:4px;margin-top:12px;"></div>
+  <div id="timelineWrap"><div id="timeline"></div></div>
+  <div id="placementConfirmArea" class="panel hidden-section" style="text-align:center;margin-top:12px;">
+    <p id="placementHint" style="font-size:0.9em;margin:0 0 10px;">Wähle einen Platz. Du kannst ihn bis zur Bestätigung ändern.</p>
+    <button id="confirmPlacementBtn" class="secondary" disabled>✅ Platzierung bestätigen</button>
+  </div>
+  <div id="extraActions" style="margin-top:18px;display:grid;gap:10px;">
+    <button id="bonusToggleBtn" class="secondary" type="button" aria-expanded="false" aria-controls="bonusGuessArea">🎯 Bonus: Interpret & Titel raten ▾</button>
+    <div id="bonusGuessArea" class="panel hidden-section" style="text-align:left;margin-bottom:0;">
+      <label for="artistGuessInput" style="margin-bottom:4px;">🎯 Bonus: Interpret & Songtitel raten (nur Token, keine Punkte)</label>
       <input type="text" id="artistGuessInput" placeholder="Interpret">
       <input type="text" id="titleGuessInput" placeholder="Songtitel" style="margin-bottom:0;">
     </div>
-  </div>
-
-  <!-- KLAUEN-PANEL -->
+    <button id="stealToggleBtn" class="steal hidden-section" type="button" aria-expanded="false" aria-controls="stealPanel">🃏 Klauen? Optionen anzeigen ▾</button>
   <div id="stealPanel" class="hidden-section">
     <h3>🃏 Klauen? Jetzt oder nie!</h3>
     <p class="stealhint">
@@ -245,25 +262,12 @@
     </div>
   </div>
 
-  <div id="deckCount"></div>
-  <div id="controls">
-    <button id="drawBtn">Nächsten Song ziehen</button>
-    <button id="swapBtn" class="secondary" disabled>🔄 Song tauschen</button>
-    <button id="revealBtn" disabled>Auflösen</button>
-    <button id="nextTurnBtn" disabled>Nächster Spieler</button>
-  </div>
-
   <div style="text-align:center;margin-top:8px;">
     <button class="danger" onclick="abortGame()" style="opacity:0.6;font-size:0.85em;padding:10px 18px;">
       ✕ Spiel abbrechen & neue Playlist laden
     </button>
   </div>
 
-  <div id="timelineOwner" style="text-align:center;opacity:0.7;font-size:0.85em;margin-bottom:4px;margin-top:12px;"></div>
-  <div id="timelineWrap"><div id="timeline"></div></div>
-  <div id="placementConfirmArea" class="panel hidden-section" style="text-align:center;margin-top:12px;">
-    <p id="placementHint" style="font-size:0.9em;margin:0 0 10px;">Wähle einen Platz. Du kannst ihn bis zur Bestätigung ändern.</p>
-    <button id="confirmPlacementBtn" class="secondary" disabled>✅ Platzierung bestätigen</button>
   </div>
 </div>
 
@@ -505,6 +509,7 @@ function serializeState() {
   };
 }
 function pushState() {
+  refreshStealToggle();
   if (!isMultiplayer || mode !== 'host' || !db || !roomCode) return;
 
   db.ref('rooms/' + roomCode).update(serializeState());
@@ -806,6 +811,7 @@ if (mode === 'companion') {
 
   if(stealMode){ renderStealPanelFromState(); }
   else { document.getElementById('stealPanel').classList.add('hidden-section'); }
+  refreshStealToggle();
   if (mode === 'companion') {
     document.getElementById('noStealRevealBtn').disabled =
       !isMyTurn() || stealMode !== 'waiting';
@@ -921,6 +927,7 @@ document.getElementById('startBtn').onclick=async()=>{
   winTarget=Math.min(parseInt(document.getElementById('winTarget').value)||10,SONGS.length);
   currentTurn=0;
   document.getElementById('setup').classList.add('hidden-section');
+  document.getElementById('joinPanel').classList.add('hidden-section');
   document.getElementById('game').classList.remove('hidden-section');
 if(document.getElementById('multiplayerToggle').checked){
   mode = 'host';
@@ -1066,9 +1073,38 @@ function makeCardEl(card){ const el=document.createElement('div'); el.className=
 function makePendingCardEl(){ const el=document.createElement('div'); el.className='card hidden pending'; el.id='pendingCard'; return el; }
 function addPendingCardToTimeline(){ pendingIndex=null; draftPlacementIndex=null; placementSending=false; renderTimeline(); }
 
+function refreshStealToggle() {
+  const button = document.getElementById('stealToggleBtn');
+  const panel = document.getElementById('stealPanel');
+  if (!button || !panel) return;
+  const active = !!stealMode;
+  button.classList.toggle('hidden-section', !active);
+  if (!active) panel.classList.add('hidden-section');
+  button.setAttribute('aria-expanded', String(active && !panel.classList.contains('hidden-section')));
+  button.textContent = stealMode === 'placing'
+    ? '🃏 Klau-Position anzeigen ' + (panel.classList.contains('hidden-section') ? '▾' : '▴')
+    : '🃏 Klauen? Optionen anzeigen ' + (panel.classList.contains('hidden-section') ? '▾' : '▴');
+}
+
+document.getElementById('bonusToggleBtn').onclick = () => {
+  const panel = document.getElementById('bonusGuessArea');
+  const opened = panel.classList.toggle('hidden-section') === false;
+  const btn = document.getElementById('bonusToggleBtn');
+  btn.setAttribute('aria-expanded', String(opened));
+  btn.textContent = opened ? '🎯 Bonus: Interpret & Titel raten ▴' : '🎯 Bonus: Interpret & Titel raten ▾';
+};
+
+document.getElementById('stealToggleBtn').onclick = () => {
+  if (!stealMode) return;
+  const panel = document.getElementById('stealPanel');
+  panel.classList.toggle('hidden-section');
+  refreshStealToggle();
+};
+
 function openStealPanel(){
   if(players.length<=1){doReveal();return;}
   stealMode='waiting'; stealingPlayerIndex=null; stealPendingIndex=null;
+  document.getElementById('stealPanel').classList.add('hidden-section');
   const activeName=players[currentTurn].name;
   document.getElementById('activePlayerName').textContent=activeName;
   document.getElementById('activePlayerName2').textContent=activeName;
@@ -1091,7 +1127,7 @@ function openStealPanel(){
     document.getElementById('stealPlayerButtons').classList.add('hidden-section');
     document.getElementById('noStealArea').classList.remove('hidden-section');
   }
-  document.getElementById('stealPanel').classList.remove('hidden-section');
+  refreshStealToggle();
   pushState();
 }
 
@@ -1129,6 +1165,8 @@ function startStealing(playerIdx) {
   document.getElementById('stealResolveArea').classList.remove('hidden-section');
 
   renderStealTimeline();
+  document.getElementById('stealPanel').classList.remove('hidden-section');
+  refreshStealToggle();
   pushState();
 }
 
@@ -1233,7 +1271,7 @@ function renderStealPanelFromState(){
     document.getElementById('stealPlacementArea').classList.add('hidden-section');
     document.getElementById('stealResolveArea').classList.add('hidden-section');
   }
-  document.getElementById('stealPanel').classList.remove('hidden-section');
+  refreshStealToggle();
 }
 
 function resolveWithSteal(){

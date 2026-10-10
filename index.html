@@ -192,6 +192,15 @@
     <h3>Wer bist du?</h3>
     <div id="playerPickButtons" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center;"></div>
   </div>
+  <div id="myIdentityPanel" class="panel hidden-section" style="max-width:500px;margin:0 auto 14px;">
+    <h3 id="myIdentityTitle" style="margin-top:0;">Dein Spielerplatz</h3>
+    <label for="myPlayerNameInput">Wie heißt du?</label>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input type="text" id="myPlayerNameInput" maxlength="28" placeholder="Dein Name" style="flex:1 1 170px;margin-bottom:0;">
+      <button id="saveMyNameBtn" class="secondary" onclick="saveMyPlayerName()">Namen speichern</button>
+    </div>
+    <p id="myIdentityStatus" style="font-size:0.82em;opacity:0.8;margin-bottom:0;" aria-live="polite">Dein Platz wird automatisch vergeben und bleibt auf diesem Gerät gespeichert.</p>
+  </div>
   <div id="waitTurnBanner" class="panel hidden-section" style="text-align:center;font-weight:700;"></div>
   <div id="scoreboard"></div>
   <div id="resultBanner"></div>
@@ -524,6 +533,18 @@ function subscribeHostToActions() {
         const validIndex = Number.isInteger(index) && index >= 0 &&
           index <= players[currentTurn].timeline.length;
         switch (val.type) {
+          case 'setName': {
+            const name = typeof val.name === 'string' ? val.name.trim().slice(0, 28) : '';
+            if (!name || !players[sender]) return;
+            players[sender].name = name;
+            renderScoreboard();
+            if (stealMode) {
+              if (stealMode === 'waiting') openStealPanel();
+              else renderStealPanelFromState();
+            }
+            pushState();
+            break;
+          }
           case 'placeCard':
             if (sender !== currentTurn || !pendingCardActive || pendingIndex !== null ||
                 stealMode || !validIndex) return;
@@ -588,6 +609,26 @@ function sendCompanionAction(type, extra = {}) {
     alert('Aktion konnte nicht gesendet werden. Bitte Verbindung prüfen.');
   });
 }
+
+function saveMyPlayerName() {
+  if (mode !== 'companion' || myPlayerIndex === null) return;
+  const input = document.getElementById('myPlayerNameInput');
+  const status = document.getElementById('myIdentityStatus');
+  const name = input.value.trim().slice(0, 28);
+  if (!name) { status.textContent = 'Bitte gib einen Namen ein.'; return; }
+  status.textContent = 'Speichere Namen...';
+  const request = sendCompanionAction('setName', { name });
+  if (!request) { status.textContent = 'Verbindung noch nicht bereit.'; return; }
+  request.then(ref => {
+    if (!ref) { status.textContent = 'Speichern fehlgeschlagen.'; return; }
+    localStorage.setItem('my_hits_name_' + roomCode, name);
+    status.textContent = '✓ Name gesendet. Er erscheint gleich auf allen Handys.';
+  });
+}
+
+document.getElementById('myPlayerNameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') saveMyPlayerName();
+});
 
 async function joinRoom() {
   const c = document.getElementById('joinCodeInput').value.trim();
@@ -665,6 +706,13 @@ const maxPlayers = Math.min(roomData.players.length, 4);
     }
 
     companionDeviceId = deviceId;
+    document.getElementById('myIdentityPanel').classList.remove('hidden-section');
+    document.getElementById('myIdentityTitle').textContent =
+      '📱 Du bist Spieler ' + (myPlayerIndex + 1);
+    document.getElementById('myPlayerNameInput').value =
+      localStorage.getItem('my_hits_name_' + roomCode) || roomData.players[myPlayerIndex].name || '';
+    document.getElementById('myIdentityStatus').textContent =
+      'Dieser Spielerplatz gehört jetzt zu diesem Gerät. Bitte gib deinen Namen ein.';
 
     ['joinPanel', 'apiSetup', 'setup'].forEach(id =>
       document.getElementById(id).classList.add('hidden-section')
@@ -710,6 +758,14 @@ if (mode === 'companion') {
   }
 }
 
+  if (mode === 'companion' && myPlayerIndex !== null && players[myPlayerIndex]) {
+    const status = document.getElementById('myIdentityStatus');
+    const input = document.getElementById('myPlayerNameInput');
+    if (input.value.trim() === players[myPlayerIndex].name) {
+      status.textContent = '✓ Du spielst als ' + players[myPlayerIndex].name +
+        ' (Spieler ' + (myPlayerIndex + 1) + ').';
+    }
+  }
   renderScoreboard(); renderTimeline(); updateDeckCount();
 
   const ea=document.getElementById('embedArea');

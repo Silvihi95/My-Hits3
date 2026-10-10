@@ -1145,13 +1145,23 @@ function refreshStealToggle() {
   const button = document.getElementById('stealToggleBtn');
   const panel = document.getElementById('stealPanel');
   if (!button || !panel) return;
-  const active = !!stealMode;
-  button.classList.toggle('hidden-section', !active);
-  if (!active) panel.classList.add('hidden-section');
-  button.setAttribute('aria-expanded', String(active && !panel.classList.contains('hidden-section')));
-  button.textContent = stealMode === 'placing'
-    ? '🃏 Klau-Position anzeigen ' + (panel.classList.contains('hidden-section') ? '▾' : '▴')
-    : '🃏 Klauen? Optionen anzeigen ' + (panel.classList.contains('hidden-section') ? '▾' : '▴');
+
+  // Nur das eigene Handy darf einen Klauversuch starten.
+  const canSteal = stealMode === 'waiting' &&
+    mode === 'companion' &&
+    myPlayerIndex !== null &&
+    myPlayerIndex !== currentTurn &&
+    players[myPlayerIndex]?.stealTokens > 0;
+
+  button.classList.toggle('hidden-section', !canSteal);
+  button.textContent = '🃏 Klauen!';
+  button.disabled = !canSteal;
+
+  // Sobald jemand klaut, wird der Zeitstrahl direkt geöffnet.
+  const showPlacement = stealMode === 'placing' &&
+    (mode === 'host' || stealingPlayerIndex === myPlayerIndex);
+  panel.classList.toggle('hidden-section', !showPlacement);
+  button.setAttribute('aria-expanded', 'false');
 }
 
 document.getElementById('bonusToggleBtn').onclick = () => {
@@ -1163,10 +1173,13 @@ document.getElementById('bonusToggleBtn').onclick = () => {
 };
 
 document.getElementById('stealToggleBtn').onclick = () => {
-  if (!stealMode) return;
-  const panel = document.getElementById('stealPanel');
-  panel.classList.toggle('hidden-section');
-  refreshStealToggle();
+  if (mode !== 'companion' || stealMode !== 'waiting' ||
+      myPlayerIndex === null || myPlayerIndex === currentTurn ||
+      !players[myPlayerIndex] || players[myPlayerIndex].stealTokens <= 0) return;
+  const button = document.getElementById('stealToggleBtn');
+  button.disabled = true;
+  button.textContent = '🃏 Klauversuch wird gesendet...';
+  startStealing(myPlayerIndex);
 };
 
 function openStealPanel(){

@@ -545,12 +545,15 @@ function renderFromSnapshot(data) {
   stealingPlayerIndex=data.stealingPlayerIndex==null?null:data.stealingPlayerIndex;
   stealPendingIndex=data.stealPendingIndex==null?null:data.stealPendingIndex;
 
-  if(mode==='companion'){
-    if(myPlayerIndex===null&&players.length>0){
-     document.getElementById('playerPickPanel').classList.add('hidden-section');
-    if(myPlayerIndex!==null&&players[myPlayerIndex])
-      document.getElementById('roleBanner').textContent='Mitspieler-Handy · Du spielst als '+players[myPlayerIndex].name+' · Raum '+roomCode;
+ if(mode==='companion'){
+  document.getElementById('playerPickPanel').classList.add('hidden-section');
+
+  if(myPlayerIndex!==null&&players[myPlayerIndex]){
+    document.getElementById('roleBanner').textContent=
+      'Mitspieler-Handy · Du spielst als '+
+      players[myPlayerIndex].name+' · Raum '+roomCode;
   }
+}
 
   renderScoreboard(); renderTimeline(); updateDeckCount();
 

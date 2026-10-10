@@ -240,7 +240,7 @@
       <input type="text" id="titleGuessInput" placeholder="Songtitel" style="margin-bottom:0;">
     </div>
     <div id="stealCountdown" class="hidden-section" role="status" aria-live="off" style="text-align:center;font-size:0.9em;color:#ffde59;"></div>
-    <button id="stealToggleBtn" class="steal hidden-section" type="button" aria-expanded="false" aria-controls="stealPanel">🃏 Klauen? Optionen anzeigen ▾</button>
+    <button id="stealToggleBtn" class="steal hidden-section" type="button" aria-expanded="false" aria-controls="stealPanel">🃏 Klauen!</button>
   <div id="stealPanel" class="hidden-section">
     <h3>🃏 Klauen? Jetzt oder nie!</h3>
     <p class="stealhint">
@@ -525,9 +525,10 @@ function pushState() {
 
 // Jede Anfrage bekommt eine eigene Firebase-ID; der Host bearbeitet sie nacheinander.
 let actionProcessing = Promise.resolve();
+let stealRequestPending = false;
 let companionDeviceId = null;
 let pendingNameConfirmation = null;
-const STEAL_WAIT_SECONDS = 5;
+const STEAL_WAIT_SECONDS = 10;
 let stealDeadline = null;
 let stealAutoTimer = null;
 function clearStealAutoTimer() {
@@ -549,7 +550,8 @@ function autoRevealAfterStealWait() {
 function beginStealWait() {
   clearStealAutoTimer();
   stealDeadline = Date.now() + STEAL_WAIT_SECONDS * 1000;
-  stealAutoTimer = setTimeout(autoRevealAfterStealWait, STEAL_WAIT_SECONDS * 1000 + 50);
+  // Kurze technische Nachlaufzeit für Firebase; die Klau-Frist bleibt 10 Sekunden.
+  stealAutoTimer = setTimeout(autoRevealAfterStealWait, STEAL_WAIT_SECONDS * 1000 + 1200);
 }
 function updateStealCountdown() {
   const el = document.getElementById('stealCountdown');
@@ -611,8 +613,14 @@ function subscribeHostToActions() {
             openStealPanel();
             break;
           case 'startSteal':
+            // Entscheidend ist der Server-Eingangszeitpunkt, nicht die
+            // Verzögerung beim Prüfen der Spielerzuordnung.
             if (stealMode === 'waiting' && sender !== currentTurn &&
-                players[sender].stealTokens > 0) startStealing(sender);
+                players[sender].stealTokens > 0 &&
+                typeof val.timestamp === 'number' &&
+                stealDeadline && val.timestamp <= stealDeadline) {
+              startStealing(sender);
+            }
             break;
           case 'placeSteal':
             if (stealMode !== 'placing' || stealingPlayerIndex !== sender || !validIndex) return;
@@ -1154,8 +1162,9 @@ function refreshStealToggle() {
     players[myPlayerIndex]?.stealTokens > 0;
 
   button.classList.toggle('hidden-section', !canSteal);
-  button.textContent = '🃏 Klauen!';
-  button.disabled = !canSteal;
+  if (stealMode !== 'waiting') stealRequestPending = false;
+  button.textContent = stealRequestPending ? '🃏 Klauversuch wird geprüft...' : '🃏 Klauen!';
+  button.disabled = !canSteal || stealRequestPending;
 
   // Sobald jemand klaut, wird der Zeitstrahl direkt geöffnet.
   const showPlacement = stealMode === 'placing' &&
@@ -1177,9 +1186,16 @@ document.getElementById('stealToggleBtn').onclick = () => {
       myPlayerIndex === null || myPlayerIndex === currentTurn ||
       !players[myPlayerIndex] || players[myPlayerIndex].stealTokens <= 0) return;
   const button = document.getElementById('stealToggleBtn');
+  stealRequestPending = true;
   button.disabled = true;
-  button.textContent = '🃏 Klauversuch wird gesendet...';
-  startStealing(myPlayerIndex);
+  button.textContent = '🃏 Klauversuch wird geprüft...';
+  const request = startStealing(myPlayerIndex);
+  if (request && typeof request.catch === 'function') {
+    request.catch(() => {
+      stealRequestPending = false;
+      refreshStealToggle();
+    });
+  }
 };
 
 function openStealPanel(){
@@ -1217,8 +1233,7 @@ function startStealing(playerIdx) {
   if (mode === 'companion') {
     if (playerIdx !== myPlayerIndex) return;
 
-    sendCompanionAction('startSteal');
-    return;
+    return sendCompanionAction('startSteal');
   }
 
   if (

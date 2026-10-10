@@ -523,8 +523,8 @@ async function joinRoom() {
   const c=document.getElementById('joinCodeInput').value.trim();
   if(!/^[0-9]{4}$/.test(c)){document.getElementById('joinStatus').textContent='Bitte 4-stelligen Code eingeben.';return;}
   roomCode=c; mode='companion'; isMultiplayer=true;
-  const s=window.localStorage.getItem('my_player_index_'+roomCode);
-  myPlayerIndex=s!==null?parseInt(s):null;
+ myPlayerIndex = 1; // Spieler 2 (Index 1)
+window.localStorage.setItem('my_player_index_'+roomCode, '1');
   document.getElementById('joinStatus').textContent='Verbinde...';
   db=initFirebaseIfNeeded();
   ['joinPanel','apiSetup','setup'].forEach(id=>document.getElementById(id).classList.add('hidden-section'));
@@ -547,10 +547,7 @@ function renderFromSnapshot(data) {
 
   if(mode==='companion'){
     if(myPlayerIndex===null&&players.length>0){
-      document.getElementById('playerPickPanel').classList.remove('hidden-section');
-      const bw=document.getElementById('playerPickButtons'); bw.innerHTML='';
-      players.forEach((p,idx)=>{ const b=document.createElement('button'); b.textContent=p.name; b.onclick=(i=>()=>pickMyPlayer(i))(idx); bw.appendChild(b); });
-    } else { document.getElementById('playerPickPanel').classList.add('hidden-section'); }
+     document.getElementById('playerPickPanel').classList.add('hidden-section');
     if(myPlayerIndex!==null&&players[myPlayerIndex])
       document.getElementById('roleBanner').textContent='Mitspieler-Handy · Du spielst als '+players[myPlayerIndex].name+' · Raum '+roomCode;
   }
@@ -677,6 +674,10 @@ document.getElementById('addPlayerBtn').onclick=()=>addPlayerRow('');
 document.getElementById('startBtn').onclick=()=>{
   const names=[...playerInputs.querySelectorAll('input')].map(i=>i.value.trim()).filter(Boolean);
   if(names.length<1){alert('Mindestens einen Spieler!');return;}
+  if(document.getElementById('multiplayerToggle').checked && names.length < 2){
+  alert('Für zwei Handys brauchst du mindestens zwei Spieler!');
+  return;
+}
   if(SONGS.length<names.length+5){alert('Zu wenige Lieder!');return;}
   deck=shuffle([...SONGS]);
   players=names.map(n=>({name:n,timeline:[deck.pop()],stealTokens:3}));

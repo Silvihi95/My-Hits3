@@ -527,6 +527,9 @@ function pushState() {
 // Jede Anfrage bekommt eine eigene Firebase-ID; der Host bearbeitet sie nacheinander.
 let actionProcessing = Promise.resolve();
 let stealRequestPending = false;
+let activeStealRequestRef = null;
+let stealRequestResetTimer = null;
+let hostStealRequestsRef = null;
 let companionDeviceId = null;
 let pendingNameConfirmation = null;
 const STEAL_WAIT_SECONDS = 10;
@@ -551,6 +554,7 @@ function autoRevealAfterStealWait() {
   } catch (error) {
     console.error('Automatische Auflösung fehlgeschlagen:', error);
     document.getElementById('stealEmergencyRevealBtn').classList.remove('hidden-section');
+    document.getElementById('npLabel').textContent = 'Auflösung fehlgeschlagen – bitte auf dem Hauptgerät erneut auflösen.';
   }
 }
 function beginStealWait() {
@@ -580,14 +584,76 @@ setInterval(() => {
   }
   const emergency = document.getElementById('stealEmergencyRevealBtn');
   if (emergency) emergency.classList.toggle('hidden-section',
-    mode === 'companion' || stealMode !== 'waiting' ||
-    !stealDeadline || Date.now() < stealDeadline + 2000);
+    mode === 'companion' || !pendingCardActive || pendingIndex === null ||
+    stealMode === 'placing' || !stealDeadline || Date.now() < stealDeadline + 2000);
 }, 250);
 document.getElementById('stealEmergencyRevealBtn').onclick = () => {
-  if (mode === 'companion' || stealMode !== 'waiting' ||
-      pendingIndex === null || !stealDeadline || Date.now() < stealDeadline) return;
-  autoRevealAfterStealWait();
+  if (mode === 'companion' || pendingIndex === null || !pendingCardActive) return;
+  if (stealMode === 'waiting') autoRevealAfterStealWait();
+  else if (stealMode !== 'placing') doReveal();
 };
+
+// Eigenständiger Klau-Kanal: kein Warten auf die normale Aktionswarteschlange.
+function subscribeHostToStealRequests() {
+  hostStealRequestsRef = db.ref('rooms/' + roomCode + '/stealRequests');
+  hostStealRequestsRef.on('child_added', async snap => {
+    const request = snap.val();
+    if (!request || request.status !== 'pending' || mode !== 'host') return;
+    const sender = Number(request.playerIndex);
+    const respond = (status, reason) => snap.ref.update({status, reason: reason || '', handledAt: firebase.database.ServerValue.TIMESTAMP});
+    try {
+      if (!Number.isInteger(sender) || sender < 1 || sender >= players.length ||
+          typeof request.deviceId !== 'string' ||
+          request.turnMarker !== pendingMarker) {
+        await respond('rejected', 'Ungültige oder veraltete Klau-Anfrage.'); return;
+      }
+      const slot = await db.ref('rooms/' + roomCode + '/playerSlots/' + sender).once('value');
+      if (slot.val() !== request.deviceId) {
+        await respond('rejected', 'Spielergerät konnte nicht bestätigt werden.'); return;
+      }
+      // Die Serverzeit der Anfrage entscheidet, nicht die Netzwerkverzögerung.
+      if (stealMode !== 'waiting' || sender === currentTurn ||
+          !players[sender] || players[sender].stealTokens <= 0 ||
+          !stealDeadline || typeof request.timestamp !== 'number' ||
+          request.timestamp > stealDeadline) {
+        await respond('rejected', 'Klauzeit vorbei oder Klauen nicht mehr möglich.'); return;
+      }
+      startStealing(sender);
+      await respond('accepted');
+    } catch (error) {
+      console.error('Direkte Klau-Anfrage fehlgeschlagen:', error);
+      await respond('rejected', 'Verbindungsfehler auf dem Hauptgerät.').catch(console.error);
+    }
+  });
+}
+function requestStealDirectly() {
+  if (mode !== 'companion' || !db || !roomCode || myPlayerIndex === null || !companionDeviceId) {
+    return Promise.reject(new Error('Spielerverbindung fehlt.'));
+  }
+  if (activeStealRequestRef) activeStealRequestRef.off();
+  const ref = db.ref('rooms/' + roomCode + '/stealRequests').push();
+  activeStealRequestRef = ref;
+  const request = {
+    status: 'pending', playerIndex: myPlayerIndex, deviceId: companionDeviceId,
+    turnMarker: lastSnapshotData?.pendingMarker,
+    timestamp: firebase.database.ServerValue.TIMESTAMP
+  };
+  const pending = ref.set(request);
+  ref.on('value', snap => {
+    const value = snap.val();
+    if (!value || value.status === 'pending') return;
+    if (activeStealRequestRef === ref) {
+      ref.off(); activeStealRequestRef = null;
+      if (stealRequestResetTimer) clearTimeout(stealRequestResetTimer);
+      if (value.status === 'rejected') {
+        stealRequestPending = false;
+        refreshStealToggle();
+        alert('Klauen nicht möglich: ' + (value.reason || 'Anfrage abgelehnt.'));
+      }
+    }
+  });
+  return pending;
+}
 
 function subscribeHostToPlacement() {
   // Platzierungen laufen ebenfalls über die Aktionswarteschlange.
@@ -1044,6 +1110,7 @@ if(document.getElementById('multiplayerToggle').checked){
 
   subscribeHostToPlacement();
   subscribeHostToActions();
+  subscribeHostToStealRequests();
 
   document.getElementById('roleBanner').textContent =
     'Haupt-Handy · Code: ' + roomCode;
@@ -1185,7 +1252,7 @@ function refreshStealToggle() {
     players[myPlayerIndex]?.stealTokens > 0;
 
   button.classList.toggle('hidden-section', !canSteal);
-  if (stealMode !== 'waiting') stealRequestPending = false;
+  if (stealMode !== 'waiting') { stealRequestPending = false; if (stealRequestResetTimer) clearTimeout(stealRequestResetTimer); }
   button.textContent = stealRequestPending ? '🃏 Klauversuch wird geprüft...' : '🃏 Klauen!';
   button.disabled = !canSteal || stealRequestPending;
 
@@ -1213,6 +1280,14 @@ document.getElementById('stealToggleBtn').onclick = () => {
   button.disabled = true;
   button.textContent = '🃏 Klauversuch wird geprüft...';
   const request = startStealing(myPlayerIndex);
+  if (stealRequestResetTimer) clearTimeout(stealRequestResetTimer);
+  stealRequestResetTimer = setTimeout(() => {
+    if (stealRequestPending && stealMode === 'waiting') {
+      stealRequestPending = false;
+      refreshStealToggle();
+      alert('Keine Bestätigung vom Hauptgerät. Bitte die Verbindung prüfen.');
+    }
+  }, 4500);
   if (!request) {
     stealRequestPending = false;
     refreshStealToggle();
@@ -1260,7 +1335,7 @@ function startStealing(playerIdx) {
   if (mode === 'companion') {
     if (playerIdx !== myPlayerIndex) return;
 
-    return sendCompanionAction('startSteal');
+    return requestStealDirectly();
   }
 
   if (

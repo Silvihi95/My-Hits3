@@ -240,6 +240,7 @@
       <input type="text" id="titleGuessInput" placeholder="Songtitel" style="margin-bottom:0;">
     </div>
     <div id="stealCountdown" class="hidden-section" role="status" aria-live="off" style="text-align:center;font-size:0.9em;color:#ffde59;"></div>
+    <button id="stealEmergencyRevealBtn" class="secondary hidden-section" type="button">⚠️ Auflösung hängt? Jetzt auflösen</button>
     <button id="stealToggleBtn" class="steal hidden-section" type="button" aria-expanded="false" aria-controls="stealPanel">🃏 Klauen!</button>
   <div id="stealPanel" class="hidden-section">
     <h3>🃏 Klauen? Jetzt oder nie!</h3>
@@ -545,11 +546,17 @@ function autoRevealAfterStealWait() {
   stealingPlayerIndex = null;
   stealPendingIndex = null;
   document.getElementById('stealPanel').classList.add('hidden-section');
-  doReveal();
+  try {
+    doReveal();
+  } catch (error) {
+    console.error('Automatische Auflösung fehlgeschlagen:', error);
+    document.getElementById('stealEmergencyRevealBtn').classList.remove('hidden-section');
+  }
 }
 function beginStealWait() {
   clearStealAutoTimer();
   stealDeadline = Date.now() + STEAL_WAIT_SECONDS * 1000;
+  document.getElementById('stealEmergencyRevealBtn').classList.add('hidden-section');
   // Kurze technische Nachlaufzeit für Firebase; die Klau-Frist bleibt 10 Sekunden.
   stealAutoTimer = setTimeout(autoRevealAfterStealWait, STEAL_WAIT_SECONDS * 1000 + 1200);
 }
@@ -564,7 +571,23 @@ function updateStealCountdown() {
     el.textContent = '🃏 Noch ' + seconds + ' Sek. zum Klauen – danach automatische Auflösung';
   }
 }
-setInterval(updateStealCountdown, 250);
+setInterval(() => {
+  updateStealCountdown();
+  // iOS kann setTimeout verzögern. Der regelmäßige Check ist eine zweite Sicherung.
+  if (mode !== 'companion' && stealMode === 'waiting' &&
+      stealDeadline && Date.now() >= stealDeadline + 1200) {
+    autoRevealAfterStealWait();
+  }
+  const emergency = document.getElementById('stealEmergencyRevealBtn');
+  if (emergency) emergency.classList.toggle('hidden-section',
+    mode === 'companion' || stealMode !== 'waiting' ||
+    !stealDeadline || Date.now() < stealDeadline + 2000);
+}, 250);
+document.getElementById('stealEmergencyRevealBtn').onclick = () => {
+  if (mode === 'companion' || stealMode !== 'waiting' ||
+      pendingIndex === null || !stealDeadline || Date.now() < stealDeadline) return;
+  autoRevealAfterStealWait();
+};
 
 function subscribeHostToPlacement() {
   // Platzierungen laufen ebenfalls über die Aktionswarteschlange.
@@ -1139,7 +1162,7 @@ document.getElementById('confirmPlacementBtn').onclick = () => {
   }
   pendingIndex=index;
   draftPlacementIndex=null;
-  document.getElementById('npLabel').textContent='Karte bestätigt! 5 Sekunden Zeit zum Klauen...';
+  document.getElementById('npLabel').textContent='Karte bestätigt! 10 Sekunden Zeit zum Klauen...';
   document.getElementById('revealBtn').disabled=true;
   renderTimeline();
   openStealPanel();
@@ -1190,7 +1213,11 @@ document.getElementById('stealToggleBtn').onclick = () => {
   button.disabled = true;
   button.textContent = '🃏 Klauversuch wird geprüft...';
   const request = startStealing(myPlayerIndex);
-  if (request && typeof request.catch === 'function') {
+  if (!request) {
+    stealRequestPending = false;
+    refreshStealToggle();
+    alert('Klau-Anfrage konnte nicht gestartet werden. Bitte Verbindung prüfen.');
+  } else if (typeof request.catch === 'function') {
     request.catch(() => {
       stealRequestPending = false;
       refreshStealToggle();

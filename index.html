@@ -99,6 +99,8 @@
   @media (max-width: 400px) {
     body { padding: 12px; } h1 { font-size: 1.3em; } .panel { padding: 12px; } #controls button { flex-basis: 100%; }
   }
+  /* My-Hits ohne Klauen: keine Klau-Bedienelemente anzeigen. */
+  #stealPanel, #stealToggleBtn, #stealCountdown, #stealEmergencyRevealBtn { display:none !important; }
 </style>
 </head>
 <body>
@@ -507,7 +509,7 @@ function serializeState() {
   return {
     players, winTarget, currentTurn, deckCount:deck.length,
     hasPendingCard:pendingCardActive, pendingIndex, pendingMarker,
-    stealMode:stealMode||false, stealingPlayerIndex, stealPendingIndex, stealDeadline,
+    stealMode:false, stealingPlayerIndex:null, stealPendingIndex:null, stealDeadline:null,
     npLabel:document.getElementById('npLabel').textContent,
     resultClass:document.getElementById('resultBanner').className,
     resultText:document.getElementById('resultBanner').textContent,
@@ -697,9 +699,9 @@ function subscribeHostToActions() {
             pendingIndex = index;
             draftPlacementIndex = null;
             document.getElementById('npLabel').textContent =
-              'Karte platziert von ' + players[sender].name + '. Klauen-Phase...';
+              'Karte bestätigt von ' + players[sender].name + '.';
             renderTimeline();
-            openStealPanel();
+            doReveal({artist: val.artistGuess, title: val.titleGuess});
             break;
           case 'startSteal':
             // Entscheidend ist der Server-Eingangszeitpunkt, nicht die
@@ -912,10 +914,10 @@ function renderFromSnapshot(data) {
     placementSending = false;
     draftPlacementMarker = data.pendingMarker;
   }
-  stealMode=data.stealMode||false;
-  stealDeadline=data.stealDeadline||null;
-  stealingPlayerIndex=data.stealingPlayerIndex==null?null:data.stealingPlayerIndex;
-  stealPendingIndex=data.stealPendingIndex==null?null:data.stealPendingIndex;
+  stealMode=false;
+  stealDeadline=null;
+  stealingPlayerIndex=null;
+  stealPendingIndex=null;
 
 if (mode === 'companion') {
   document.getElementById('playerPickPanel').classList.add('hidden-section');
@@ -972,7 +974,7 @@ if (mode === 'companion') {
   const banner=document.getElementById('resultBanner');
   banner.className=data.resultClass||''; banner.textContent=data.resultText||'';
 
-  if(stealMode){ renderStealPanelFromState(); }
+  if(false){ renderStealPanelFromState(); }
   else { document.getElementById('stealPanel').classList.add('hidden-section'); }
   refreshStealToggle();
   if (mode === 'companion') {
@@ -1086,7 +1088,7 @@ document.getElementById('startBtn').onclick=async()=>{
   }
   if(SONGS.length<names.length+5){alert('Zu wenige Lieder!');return;}
   deck=shuffle([...SONGS]);
-  players=names.map(n=>({name:n,timeline:[deck.pop()],stealTokens:3}));
+  players=names.map(n=>({name:n,timeline:[deck.pop()]}));
   winTarget=Math.min(parseInt(document.getElementById('winTarget').value)||10,SONGS.length);
   currentTurn=0;
   document.getElementById('setup').classList.add('hidden-section');
@@ -1110,7 +1112,7 @@ if(document.getElementById('multiplayerToggle').checked){
 
   subscribeHostToPlacement();
   subscribeHostToActions();
-  subscribeHostToStealRequests();
+  // Klauen ist deaktiviert: keine Klau-Anfragen abonnieren.
 
   document.getElementById('roleBanner').textContent =
     'Haupt-Handy · Code: ' + roomCode;
@@ -1129,7 +1131,7 @@ function updateDeckCount(){ document.getElementById('deckCount').textContent='No
 
 function renderScoreboard(){
   const sb=document.getElementById('scoreboard'); sb.innerHTML='';
-  players.forEach((p,idx)=>{ const b=document.createElement('div'); b.className='playerBadge'+(idx===currentTurn?' active':''); b.innerHTML=p.name+' <span class="count">'+p.timeline.length+'/'+winTarget+'</span> 🃏 '+p.stealTokens; sb.appendChild(b); });
+  players.forEach((p,idx)=>{ const b=document.createElement('div'); b.className='playerBadge'+(idx===currentTurn?' active':''); b.innerHTML=p.name+' <span class="count">'+p.timeline.length+'/'+winTarget+'</span>'; sb.appendChild(b); });
 }
 
 function drawSong(){
@@ -1221,7 +1223,7 @@ document.getElementById('confirmPlacementBtn').onclick = () => {
   if (isMultiplayer && mode === 'companion') {
     placementSending = true;
     updatePlacementConfirm();
-    const request = sendCompanionAction('placeCard', {index});
+    const request = sendCompanionAction('placeCard', {index, artistGuess: document.getElementById('artistGuessInput').value, titleGuess: document.getElementById('titleGuessInput').value});
     if (request && typeof request.catch === 'function') {
       request.catch(() => { placementSending=false; updatePlacementConfirm(); });
     }
@@ -1229,10 +1231,10 @@ document.getElementById('confirmPlacementBtn').onclick = () => {
   }
   pendingIndex=index;
   draftPlacementIndex=null;
-  document.getElementById('npLabel').textContent='Karte bestätigt! 10 Sekunden Zeit zum Klauen...';
+  document.getElementById('npLabel').textContent='Karte bestätigt!';
   document.getElementById('revealBtn').disabled=true;
   renderTimeline();
-  openStealPanel();
+  doReveal();
 };
 
 function makeCardEl(card){ const el=document.createElement('div'); el.className='card'; el.innerHTML='<div class="year">'+card.year+'</div><div class="title">'+card.title+'</div><div class="artist">'+card.artist+'</div>'; return el; }
@@ -1240,65 +1242,12 @@ function makePendingCardEl(){ const el=document.createElement('div'); el.classNa
 function addPendingCardToTimeline(){ pendingIndex=null; draftPlacementIndex=null; placementSending=false; renderTimeline(); }
 
 function refreshStealToggle() {
-  const button = document.getElementById('stealToggleBtn');
-  const panel = document.getElementById('stealPanel');
-  if (!button || !panel) return;
-
-  // Nur das eigene Handy darf einen Klauversuch starten.
-  const canSteal = stealMode === 'waiting' &&
-    mode === 'companion' &&
-    myPlayerIndex !== null &&
-    myPlayerIndex !== currentTurn &&
-    players[myPlayerIndex]?.stealTokens > 0;
-
-  button.classList.toggle('hidden-section', !canSteal);
-  if (stealMode !== 'waiting') { stealRequestPending = false; if (stealRequestResetTimer) clearTimeout(stealRequestResetTimer); }
-  button.textContent = stealRequestPending ? '🃏 Klauversuch wird geprüft...' : '🃏 Klauen!';
-  button.disabled = !canSteal || stealRequestPending;
-
-  // Sobald jemand klaut, wird der Zeitstrahl direkt geöffnet.
-  const showPlacement = stealMode === 'placing' &&
-    (mode === 'host' || stealingPlayerIndex === myPlayerIndex);
-  panel.classList.toggle('hidden-section', !showPlacement);
-  button.setAttribute('aria-expanded', 'false');
-}
-
-document.getElementById('bonusToggleBtn').onclick = () => {
-  const panel = document.getElementById('bonusGuessArea');
-  const opened = panel.classList.toggle('hidden-section') === false;
-  const btn = document.getElementById('bonusToggleBtn');
-  btn.setAttribute('aria-expanded', String(opened));
-  btn.textContent = opened ? '🎯 Bonus: Interpret & Titel raten ▴' : '🎯 Bonus: Interpret & Titel raten ▾';
-};
-
-document.getElementById('stealToggleBtn').onclick = () => {
-  if (mode !== 'companion' || stealMode !== 'waiting' ||
-      myPlayerIndex === null || myPlayerIndex === currentTurn ||
-      !players[myPlayerIndex] || players[myPlayerIndex].stealTokens <= 0) return;
-  const button = document.getElementById('stealToggleBtn');
-  stealRequestPending = true;
-  button.disabled = true;
-  button.textContent = '🃏 Klauversuch wird geprüft...';
-  const request = startStealing(myPlayerIndex);
-  if (stealRequestResetTimer) clearTimeout(stealRequestResetTimer);
-  stealRequestResetTimer = setTimeout(() => {
-    if (stealRequestPending && stealMode === 'waiting') {
-      stealRequestPending = false;
-      refreshStealToggle();
-      alert('Keine Bestätigung vom Hauptgerät. Bitte die Verbindung prüfen.');
-    }
-  }, 4500);
-  if (!request) {
-    stealRequestPending = false;
-    refreshStealToggle();
-    alert('Klau-Anfrage konnte nicht gestartet werden. Bitte Verbindung prüfen.');
-  } else if (typeof request.catch === 'function') {
-    request.catch(() => {
-      stealRequestPending = false;
-      refreshStealToggle();
-    });
+  // Ohne Klauen bleibt die Spielsteuerung ausschließlich bei Bestätigen & Auflösen.
+  for (const id of ['stealPanel', 'stealToggleBtn', 'stealCountdown', 'stealEmergencyRevealBtn']) {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden-section');
   }
-};
+}
 
 function openStealPanel(){
   if(players.length<=1){doReveal();return;}
@@ -1575,7 +1524,7 @@ function doReveal(remoteGuesses){
   if(document.getElementById('overlay'))document.getElementById('overlay').style.display='none';
   if(currentController){try{currentController.pause();}catch(e){}}
   const banner=document.getElementById('resultBanner');
-  let bm=''; if(ac&&tc){ bm=' 🎯 Interpret & Titel richtig! (+1 Token)'; players[currentTurn].stealTokens++; } else if(ac||tc) bm=' 🎯 Einer richtig! (+0.5 Token)';
+  let bm=''; if(ac&&tc) bm=' 🎯 Interpret & Titel richtig!'; else if(ac||tc) bm=' 🎯 Ein Bonus-Tipp richtig!';
   if(correct){ banner.className='show ok'; banner.textContent='Richtig! "'+pendingSong.title+'" ist von '+pendingSong.year+'.'+bm; players[currentTurn].timeline.push(pendingSong); }
   else { banner.className='show bad'; banner.textContent='Falsch! "'+pendingSong.title+'" ist von '+pendingSong.year+'. Karte abgeworfen.'+bm; }
   pendingSong=null; pendingIndex=null; pendingCardActive=false; draftPlacementIndex=null; placementSending=false; clearBonusGuessInputs();
